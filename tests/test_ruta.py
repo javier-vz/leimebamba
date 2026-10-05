@@ -158,3 +158,78 @@ def test_el_pipeline_no_exige_el_camino_para_preparar():
     fuente = inspect.getsource(pipeline.preparar_rasteres)
     assert "ruta_camino.exists()" in fuente
     assert "la mascara es la caja entera" in fuente
+
+
+# ------------------------------------------- deteccion automatica en datos/
+
+def _pon(tmp_path, nombre):
+    (tmp_path / nombre).write_bytes(b"x")
+    return tmp_path / nombre
+
+
+def test_encuentra_el_archivo_que_dejaste_en_datos(cfg, tmp_path, monkeypatch):
+    """No hay que acordarse de ninguna opcion: si el archivo esta ahi, se usa."""
+    monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
+    _pon(tmp_path, "Qhapaq Nan.kmz")
+    assert ruta.busca_archivo(cfg).name == "Qhapaq Nan.kmz"
+
+
+def test_prefiere_el_kmz_del_registro_al_gpx_de_campo(cfg, tmp_path, monkeypatch):
+    monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
+    _pon(tmp_path, "dia1.gpx")
+    _pon(tmp_path, "registro.kmz")
+    _pon(tmp_path, "algo.gpkg")
+    assert ruta.busca_archivo(cfg).suffix == ".kmz"
+
+
+def test_no_confunde_sus_propias_salidas_con_una_fuente(cfg, tmp_path, monkeypatch):
+    """agua_osm.json y qn_geocam.gpkg los escribe el propio programa."""
+    monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
+    _pon(tmp_path, "agua_osm.json")
+    _pon(tmp_path, "qn_geocam.gpkg")
+    _pon(tmp_path, "tracks.gpkg")
+    assert ruta.busca_archivo(cfg) is None
+
+
+def test_ignora_lo_que_no_es_geometria(cfg, tmp_path, monkeypatch):
+    monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
+    _pon(tmp_path, "cop30_raw.tif")
+    _pon(tmp_path, "notas.txt")
+    assert ruta.busca_archivo(cfg) is None
+
+
+def test_auto_usa_el_archivo_antes_que_geocam(cfg, tmp_path, monkeypatch):
+    import geopandas as gpd
+    from shapely.geometry import LineString
+    monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
+    linea = LineString([(-77.85, -6.60), (-77.86, -6.30)])
+    gpd.GeoDataFrame({"n": [1]}, geometry=[linea], crs="EPSG:4326") \
+        .to_file(tmp_path / "mi_camino.geojson", driver="GeoJSON")
+
+    def no_llamar(*a, **kw):
+        raise AssertionError("no deberia ir a GeoCAM habiendo archivo")
+    from camino import descarga
+    monkeypatch.setattr(descarga, "camino_registrado", no_llamar)
+
+    destino = ruta.importar(cfg, "auto")
+    assert destino.name == "qn_geocam.gpkg"
+
+
+def test_auto_cae_en_geocam_si_no_hay_archivo(cfg, tmp_path, monkeypatch):
+    monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
+    llamado = []
+    from camino import descarga
+    monkeypatch.setattr(descarga, "camino_registrado",
+                        lambda c, forzar=False: llamado.append(True))
+    ruta.importar(cfg, "auto")
+    assert llamado == [True]
+
+
+def test_auto_es_el_valor_por_omision_de_la_cli():
+    from camino import cli
+    ap_default = cli.main.__doc__  # solo para documentar la intencion
+    import argparse, contextlib, io
+    with contextlib.redirect_stdout(io.StringIO()) as s:
+        with pytest.raises(SystemExit):
+            cli.main(["--help"])
+    assert "auto = usa el archivo que haya en datos/" in s.getvalue()

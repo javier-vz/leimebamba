@@ -25,6 +25,7 @@ es como Google Earth guarda las tablas de atributos. Hay que extraerlos.
 
 from __future__ import annotations
 
+import math
 import pathlib
 import re
 import tempfile
@@ -76,6 +77,77 @@ def capas(ruta) -> list[str]:
     """Nombres de las capas de un KML/KMZ."""
     import pyogrio
     return [str(c[0]) for c in pyogrio.list_layers(str(abrir_kmz(ruta)))]
+
+
+def diagonal(gdf) -> float:
+    """Diagonal de la caja envolvente de un grupo, en metros del CRS."""
+    xmin, ymin, xmax, ymax = gdf.total_bounds
+    return float(math.hypot(xmax - xmin, ymax - ymin))
+
+
+def no_es_un_tramo(gdf, diagonal_max: float) -> str:
+    """Razon por la que un grupo de `tramnomb` NO es un tramo, o "".
+
+    Hace falta porque el registro usa el campo del nombre del tramo para dos
+    cosas distintas. La mayoria de los valores son tramos de verdad, con
+    forma "A - B". Pero hay al menos uno, "En proceso", que es un ESTADO DE
+    TRABAJO del Ministerio y aparece en rasgos repartidos por todo el pais:
+    agrupar por nombre lo convierte en un "tramo" cuya caja envolvente va de
+    Ayacucho a Amazonas, 551 x 924 km.
+
+    Eso no es un detalle cosmetico. Un grupo asi:
+
+      - propone una caja de estudio 180 veces mas grande que la necesaria
+      - y, si entrara al analisis como unidad, pondria a comparar los pesos
+        de un camino contra los de una etiqueta administrativa.
+
+    El criterio es la DIAGONAL, en terminos absolutos, y no la dispersion
+    relativa (diagonal partido por largo): los tramos del registro vienen en
+    pedazos con huecos, asi que su diagonal ya es mayor que su longitud y la
+    razon relativa no separa limpiamente. Un tramo con nombre, en cambio,
+    une dos lugares vecinos: el mas largo que aparece por aqui es
+    Chachapoyas - Jumbilla con 61 km completos. Mil kilometros no es un
+    tramo por ningun criterio.
+    """
+    d = diagonal(gdf)
+    if d > diagonal_max:
+        return (f"su caja envolvente mide {d / 1000:.0f} km de diagonal, "
+                f"mas del limite de {diagonal_max / 1000:.0f} km: no es un "
+                "tramo, es una etiqueta repartida por el mapa")
+    return ""
+
+
+def separa_los_que_no_son_tramos(cfg, qn):
+    """Quita del registro los grupos de `tramnomb` que no son tramos.
+
+    Devuelve (qn_limpio, [(nombre, razon)]). Se aplica ANTES de recortar a la
+    caja: una vez recortado, un grupo disperso parece local y ya no se puede
+    distinguir.
+    """
+    if "tramnomb" not in qn.columns:
+        return qn, []
+
+    nombres = qn["tramnomb"].fillna("(sin nombre)")
+    fuera = []
+    for nombre, sub in qn.groupby(nombres):
+        if str(nombre) in cfg.tramos_excluidos:
+            fuera.append((str(nombre), "excluido a mano en config.yaml "
+                                       "(datos.tramos_excluidos)"))
+            continue
+        razon = no_es_un_tramo(sub, cfg.diagonal_max_tramo)
+        if razon:
+            fuera.append((str(nombre), razon))
+
+    if not fuera:
+        return qn, []
+
+    descartados = {n for n, _ in fuera}
+    print("\n  --- grupos de 'tramnomb' que NO son tramos ---")
+    for nombre, razon in fuera:
+        print(f"  '{nombre}': {razon}")
+    print("  Se quitan del registro. Si alguno te interesa, sacalo de")
+    print("  'datos.tramos_excluidos' o sube 'datos.diagonal_max_tramo'.")
+    return qn[~nombres.isin(descartados)].copy(), fuera
 
 
 def clasifica(nombre: str) -> str:

@@ -163,6 +163,19 @@ def test_banda_incertidumbre():
     d = preparar.banda_incertidumbre(a, b)
     assert d["mediana_m"] == pytest.approx(1.5)
     assert d["max_m"] == pytest.approx(3.0)
+    assert d["pct_sobre_50m"] == 0.0
+
+
+def test_la_incertidumbre_distingue_el_p90_del_maximo():
+    """El maximo lo fija un pixel suelto; el numero publicable es el p90."""
+    import numpy as np
+    a = np.zeros(1000)
+    b = np.full(1000, 2.0)
+    b[0] = 700.0                       # un vacio de datos, o una pared
+    d = preparar.banda_incertidumbre(a, b)
+    assert d["p90_m"] == pytest.approx(2.0)
+    assert d["max_m"] == pytest.approx(700.0)
+    assert d["pct_sobre_50m"] == pytest.approx(0.1)
 
 
 def test_los_tiles_de_copernicus_usan_la_esquina_suroeste(cfg):
@@ -207,7 +220,164 @@ def test_config_limpia_el_sufijo_query_del_servicio(cfg):
 
 
 def test_config_conoce_sus_componentes(cfg):
-    assert cfg.componentes[0] == "pendiente"
+    assert cfg.componentes[0] == "fisico"
     assert cfg.k == len(cfg.componentes)
-    assert "pendiente" not in cfg.componentes_simetricas
+    assert "fisico" not in cfg.componentes_simetricas
     assert len(cfg.vecinos) == cfg.vecindad
+
+
+def test_el_modelo_de_referencia_es_el_caso_restringido(cfg):
+    """El proyecto lo exige: mismo grafo, mismos extremos, y el de
+    referencia como caso restringido del ampliado."""
+    assert set(cfg.componentes_referencia) <= set(cfg.componentes_ampliado)
+    assert cfg.componentes[0] == "fisico"
+    assert set(cfg.componentes) == set(cfg.componentes_referencia) | \
+        set(cfg.componentes_ampliado)
+
+
+# ------------------------------------------ unidades: tramos o sectores
+
+def _camino_con_tramos(cfg):
+    """Dos tramos con nombre, uno largo y uno corto."""
+    import geopandas as gpd
+    from shapely.geometry import LineString
+    largo = LineString([(175000, 9290000), (176000, 9280000)])     # ~10 km
+    corto = LineString([(180000, 9300000), (180500, 9298000)])     # ~2 km
+    return gpd.GeoDataFrame(
+        {"tramnomb": ["Chillo - Chachapoyas", "Ubillon - Zuta"]},
+        geometry=[largo, corto], crs=cfg.crs)
+
+
+def test_las_unidades_tramo_son_los_tramos_del_registro(cfg):
+    g = _camino_con_tramos(cfg)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo",
+                       "largo_min_unidad": 5000})
+    uds = preparar.unidades(con, g)
+    assert [n for n, _ in uds] == ["Chillo - Chachapoyas"]   # el corto no llega
+
+
+def test_las_unidades_tramo_se_ordenan_de_mayor_a_menor(cfg):
+    g = _camino_con_tramos(cfg)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo",
+                       "largo_min_unidad": 100})
+    uds = preparar.unidades(con, g)
+    assert [n for n, _ in uds] == ["Chillo - Chachapoyas", "Ubillon - Zuta"]
+    assert uds[0][1].length > uds[1][1].length
+
+
+def test_sin_tramos_que_lleguen_al_minimo_avisa(cfg):
+    g = _camino_con_tramos(cfg)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo",
+                       "largo_min_unidad": 1e6})
+    with pytest.raises(SystemExit, match="Ningun tramo"):
+        preparar.unidades(con, g)
+
+
+def test_unidad_tramo_necesita_una_fuente_con_tramos(cfg):
+    """Un GPX o unas trazas de OSM no traen tramos con nombre."""
+    g = _camino_recto(10000.0).drop(columns=[])
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo"})
+    with pytest.raises(SystemExit, match="no trae tramos"):
+        preparar.unidades(con, g)
+
+
+def test_unidad_sector_corta_el_tramo(cfg):
+    g = _camino_recto(12000.0)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "sector", "n_sectores": 4})
+    uds = preparar.unidades(con, g)
+    assert [n for n, _ in uds] == ["s1", "s2", "s3", "s4"]
+    assert all(t.length == pytest.approx(3000.0) for _, t in uds)
+
+
+def test_unidad_desconocida_se_rechaza(cfg):
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "inventada"})
+    with pytest.raises(ValueError, match="tramo.*sector"):
+        preparar.unidades(con, _camino_recto(5000.0))
+
+
+# ------------------------------------------------- subgrafo por unidad
+
+def test_el_subgrafo_conserva_los_costos_de_sus_aristas():
+    """Cada unidad se analiza en su vecindad; los costos no pueden cambiar
+    al recortar el grafo."""
+    import numpy as np
+    from camino import costo, grafo
+
+    rng = np.random.default_rng(4)
+    z = rng.normal(0, 3.0, (16, 16))
+    comp = {"rug": costo.normaliza(rng.uniform(size=(16, 16)))}
+    g = grafo.construir(z, np.ones((16, 16), dtype=bool), comp, 30.0)
+
+    nodos = np.array([g.nodo(f, c) for f in range(4, 12) for c in range(4, 12)])
+    sub = g.subconjunto(nodos)
+    assert sub.n == len(nodos)
+    assert sub.e < g.e
+
+    w = np.array([0.6, 0.4])
+    entero, recortado = g.costos(w).tocoo(), sub.costos(w).tocoo()
+    de_sub = {(tuple(sub.filcol[i]), tuple(sub.filcol[j])): v
+              for i, j, v in zip(recortado.row, recortado.col, recortado.data)}
+    comprobadas = 0
+    for i, j, v in zip(entero.row, entero.col, entero.data):
+        clave = (tuple(g.filcol[i]), tuple(g.filcol[j]))
+        if clave in de_sub:
+            assert de_sub[clave] == pytest.approx(v, rel=1e-12)
+            comprobadas += 1
+    assert comprobadas == sub.e > 100
+
+
+def test_el_subgrafo_se_niega_si_queda_vacio():
+    import numpy as np
+    from camino import costo, grafo
+    g = grafo.construir(np.zeros((8, 8)), np.ones((8, 8), dtype=bool),
+                        {"rug": np.full((8, 8), 0.5)}, 30.0)
+    with pytest.raises(ValueError, match="ningun nodo"):
+        g.subconjunto([])
+    with pytest.raises(ValueError, match="ninguna arista"):
+        g.subconjunto([g.nodo(0, 0)])
+
+
+def test_nodos_cerca_de_una_geometria(cfg):
+    import numpy as np
+    from camino import grafo
+    from shapely.geometry import LineString
+
+    t = preparar.rejilla(cfg)[0]
+    g = grafo.construir(np.zeros((20, 20)), np.ones((20, 20), dtype=bool),
+                        {"rug": np.full((20, 20), 0.5)}, cfg.resolucion)
+    xy0 = grafo.xy(np.array([[10, 0], [10, 19]]), tuple(t)[:6])
+    linea = LineString(xy0)
+    cerca = g.nodos_cerca_de(linea, tuple(t)[:6], 60.0)
+    assert 0 < len(cerca) < g.n
+    filas = {int(f) for f, _ in g.filcol[cerca]}
+    assert filas <= {8, 9, 10, 11, 12}
+
+
+def test_detecta_las_unidades_cortadas_por_la_caja(cfg):
+    """Un tramo cortado por la caja tiene un extremo inventado."""
+    import geopandas as gpd
+    from shapely.geometry import LineString
+
+    oeste, sur, este, norte = cfg.bbox
+    # una que llega justo al borde este, y otra bien dentro
+    borde = gpd.GeoSeries(
+        [LineString([(este, -6.40), (este - 0.05, -6.45)])],
+        crs="EPSG:4326").to_crs(cfg.crs)[0]
+    dentro = gpd.GeoSeries(
+        [LineString([(-77.88, -6.40), (-77.87, -6.45)])],
+        crs="EPSG:4326").to_crs(cfg.crs)[0]
+
+    assert preparar.recortada_por_la_caja(cfg, borde)
+    assert not preparar.recortada_por_la_caja(cfg, dentro)
+
+
+def test_el_aviso_nombra_las_unidades_cortadas(cfg, capsys):
+    import geopandas as gpd
+    from shapely.geometry import LineString
+    oeste, sur, este, norte = cfg.bbox
+    borde = gpd.GeoSeries(
+        [LineString([(este, -6.40), (este - 0.05, -6.45)])],
+        crs="EPSG:4326").to_crs(cfg.crs)[0]
+    tocadas = preparar.avisa_recortadas(cfg, [("La Jalca - Mendoza", borde)])
+    assert tocadas == ["La Jalca - Mendoza"]
+    assert "borde de la caja" in capsys.readouterr().out

@@ -192,7 +192,8 @@ def test_el_inventario_ordena_por_continuo(kmz, cfg):
 def test_filtra_el_tramo_que_pide_la_config(kmz, cfg):
     from camino import ruta
     g = registro.lee(kmz, cfg.crs, solo_observadas=False)
-    con = type(cfg)(**{**cfg.__dict__, "tramo": "La Jalca - Mendoza"})
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "sector",
+                       "tramo": "La Jalca - Mendoza"})
     sel = ruta.filtra_tramo(con, g)
     assert set(sel["tramnomb"]) == {"La Jalca - Mendoza"}
 
@@ -200,7 +201,8 @@ def test_filtra_el_tramo_que_pide_la_config(kmz, cfg):
 def test_avisa_si_el_tramo_pedido_no_esta(kmz, cfg):
     from camino import ruta
     g = registro.lee(kmz, cfg.crs)
-    con = type(cfg)(**{**cfg.__dict__, "tramo": "Cusco - Puno"})
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "sector",
+                       "tramo": "Cusco - Puno"})
     with pytest.raises(SystemExit, match="no aparece en la caja"):
         ruta.filtra_tramo(con, g)
 
@@ -208,7 +210,7 @@ def test_avisa_si_el_tramo_pedido_no_esta(kmz, cfg):
 def test_sin_tramo_se_queda_con_todo(kmz, cfg):
     from camino import ruta
     g = registro.lee(kmz, cfg.crs, solo_observadas=False)
-    con = type(cfg)(**{**cfg.__dict__, "tramo": ""})
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "sector", "tramo": ""})
     assert len(ruta.filtra_tramo(con, g)) == len(g)
 
 

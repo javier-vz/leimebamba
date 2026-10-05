@@ -111,6 +111,81 @@ class Grafo:
                    L=L, Phi=d["Phi"].astype(np.float64),
                    nombres=tuple(str(s) for s in d["nombres"]), _csr=csr)
 
+    def subconjunto(self, nodos) -> "Grafo":
+        """Un grafo restringido a `nodos`, con los indices renumerados.
+
+        Hace falta para analizar cada unidad (sector o tramo) en SU PROPIA
+        vecindad. Si el nulo de un tramo se corriera sobre el corredor
+        entero, estaria preguntando algo distinto -- y tardaria horas: el
+        coste de un Dijkstra crece con el grafo, no con el trozo que
+        interesa.
+        """
+        nodos = np.unique(np.asarray(nodos, dtype=np.int64))
+        if nodos.size == 0:
+            raise ValueError("el subconjunto no tiene ningun nodo")
+
+        renum = np.full(self.n, -1, dtype=np.int64)
+        renum[nodos] = np.arange(nodos.size, dtype=np.int64)
+
+        filas = np.repeat(np.arange(self.n, dtype=np.int64),
+                          np.diff(self._csr.indptr))
+        cols = self._csr.indices.astype(np.int64)
+        viva = (renum[filas] >= 0) & (renum[cols] >= 0)
+        if not viva.any():
+            raise ValueError("el subconjunto no deja ninguna arista")
+
+        f2, c2 = renum[filas[viva]], renum[cols[viva]]
+        L2, Phi2 = self.L[viva], self.Phi[viva]
+
+        perm, indices, indptr = _permutacion_csr(f2, c2, nodos.size)
+        csr = sp.csr_matrix((np.ones(L2.size, dtype=np.float64), indices, indptr),
+                            shape=(nodos.size, nodos.size))
+
+        indice = np.full(self.forma, -1, dtype=np.int64)
+        fc = self.filcol[nodos]
+        indice[fc[:, 0], fc[:, 1]] = np.arange(nodos.size)
+
+        return Grafo(n=int(nodos.size), forma=self.forma, indice=indice,
+                     filcol=fc, L=np.ascontiguousarray(L2[perm]),
+                     Phi=np.ascontiguousarray(Phi2[perm]),
+                     nombres=self.nombres, _csr=csr)
+
+    def fija_componente(self, nombre: str, por_nodo) -> None:
+        """Reescribe una columna de Phi desde un valor por nodo.
+
+        Hace falta porque hay componentes que NO son globales. La
+        proximidad ceremonial, por ejemplo, excluye los sitios que caen en
+        los extremos del tramo analizado -- es regla del proyecto -- asi que
+        su superficie depende de la unidad y se recalcula sobre el subgrafo.
+        La regla de transformacion (la saturacion) si es comun: lo que
+        cambia es el conjunto de sitios, no la escala.
+        """
+        if nombre not in self.nombres:
+            raise ValueError(f"'{nombre}' no es una componente de este grafo")
+        k = self.nombres.index(nombre)
+        v = np.asarray(por_nodo, dtype=np.float64)
+        if v.shape != (self.n,):
+            raise ValueError(f"se esperaba un valor por nodo ({self.n})")
+        filas = np.repeat(np.arange(self.n, dtype=np.int64),
+                          np.diff(self._csr.indptr))
+        self.Phi[:, k] = 0.5 * (v[filas] + v[self._csr.indices])
+
+    def xy_nodos(self, transform6):
+        """Coordenadas del centro de cada nodo."""
+        return xy(self.filcol, transform6)
+
+    def nodos_cerca_de(self, geometria, transform, radio: float) -> np.ndarray:
+        """Nodos a menos de `radio` metros de una geometria."""
+        from scipy.spatial import cKDTree
+        from shapely import get_coordinates
+
+        pts = get_coordinates(geometria)
+        if pts.size == 0:
+            raise ValueError("la geometria no tiene vertices")
+        xy_nodos = xy(self.filcol, transform)
+        d, _ = cKDTree(pts).query(xy_nodos)
+        return np.flatnonzero(d <= radio)
+
     def nodo(self, fila: int, col: int) -> int:
         v = int(self.indice[fila, col])
         if v < 0:

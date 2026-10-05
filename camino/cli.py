@@ -9,27 +9,41 @@ import argparse
 import sys
 import time
 
-from . import buscar, config, pipeline, ruta as _ruta
+from . import buscar, caja, config, pipeline, ruta as _ruta
 
 PASOS = {
     "bajar": (pipeline.bajar, "DEM (dos fuentes) y cuerpos de agua"),
     "ruta": (None, "el camino observado: de GeoCAM, de un archivo tuyo o de OSM"),
     "preparar": (pipeline.preparar_rasteres, "alinear los DEM y armar la mascara del corredor"),
-    "superficies": (pipeline.construir_superficies, "pendiente, rugosidad, drenaje y humedad"),
-    "grafo": (pipeline.construir_grafo, "el grafo dirigido y la matriz Phi"),
-    "revisar": (pipeline.revisar_grafo, "UN camino, para mirarlo antes de seguir"),
-    "nulos": (pipeline.correr_nulos, "el nulo por sector; va ANTES del barrido"),
-    "barrido": (pipeline.barrer, "el barrido de pesos sobre el simplex"),
+    "superficies": (pipeline.construir_superficies,
+                    "pendiente; la rugosidad recorta la mascara; drenaje "
+                    "de diagnostico"),
+    "grafo": (pipeline.construir_grafo,
+              "el grafo dirigido y la matriz Phi, una columna por componente"),
+    "revisar": (pipeline.revisar_grafo,
+                "un camino por unidad, para MIRARLOS antes de seguir"),
+    "nulos": (pipeline.correr_nulos,
+              "el nulo por unidad; va ANTES del barrido"),
+    "barrido": (pipeline.barrer,
+                "los DOS modelos sobre cada unidad, sobre el simplex"),
+    "validar": (pipeline.validar,
+                "validacion bloqueada: la prueba que decide si el modelo "
+                "ampliado aporta"),
     "resultados": (pipeline.resultados, "el perfil de equifinalidad y su figura"),
 }
 
 ORDEN = ("bajar", "ruta", "preparar", "superficies", "grafo", "revisar",
-         "nulos", "barrido", "resultados")
+         "nulos", "barrido", "validar", "resultados")
 
 # Ayudas que no son parte del pipeline: se corren cuando hacen falta.
 AYUDAS = {
     "buscar": (buscar.informe,
                "encuentra la direccion del servicio de GeoCAM y la guarda"),
+    "caja": (caja.informe,
+             "que caja haria falta para que los tramos entren completos"),
+    "sensibilidad": (pipeline.sensibilidad_sectores,
+                     "repite el barrido con otros cortes: dice si la "
+                     "estructura por sectores es real o del corte"),
 }
 
 _FORZABLES = {"bajar"}
@@ -43,7 +57,7 @@ def main(argv=None) -> int:
         epilog="Pasos en orden: " + " -> ".join(ORDEN)
                + ".  'todo' los corre todos.\n"
                + "Ayuda aparte: 'buscar' encuentra la direccion de GeoCAM "
-                 "antes del paso 'geocam'.",
+                 "antes del paso 'ruta'.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("paso", choices=(*ORDEN, "todo", *AYUDAS),
                     help="; ".join(f"{k}: {v[1]}"
@@ -51,8 +65,8 @@ def main(argv=None) -> int:
     ap.add_argument("--config", default=None, help="ruta de config.yaml")
     ap.add_argument("--forzar", action="store_true",
                     help="vuelve a bajar lo que ya esta en disco")
-    ap.add_argument("--fuente", choices=_ruta.FUENTES, default="geocam",
-                    help="solo con 'ruta': de donde sacar el camino observado")
+    ap.add_argument("--fuente", choices=_ruta.FUENTES, default="auto",
+                    help="solo con 'ruta': de donde sacar el camino observado. auto = usa el archivo que haya en datos/, y si no, GeoCAM")
     ap.add_argument("--archivo", default=None,
                     help="solo con 'ruta --fuente archivo': el .gpx/.kml/.shp")
     args = ap.parse_args(argv)

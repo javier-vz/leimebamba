@@ -143,3 +143,31 @@ def phi_drenaje(acumulacion_celdas):
         out = np.log10(1.0 + np.maximum(a, 0.0))
     out[~np.isfinite(a)] = np.nan
     return out
+
+
+def proximidad(puntos_xy, filcol_xy, forma, saturacion: float = 5000.0):
+    """Distancia euclidiana al sitio mas cercano, normalizada a [0,1].
+
+    `puntos_xy`  (m, 2) coordenadas de los sitios, en el CRS de trabajo.
+    `filcol_xy`  (n, 2) coordenadas del centro de cada celda transitable.
+    `forma`      forma del raster de salida.
+
+    Se usa un arbol de vecinos y no una transformada de distancia porque
+    los sitios pueden caer FUERA de la caja: un santuario a 2 km del borde
+    sigue condicionando las celdas de dentro, y la transformada solo
+    propaga desde semillas que esten en la rejilla.
+
+    Satura a `saturacion` metros: mas alla da igual estar mas lejos, y sin
+    saturar un sitio aislado domina la superficie de medio corredor.
+
+    Valores MAYORES = mas separacion = mas penalizacion, que es el sentido
+    que le da el proyecto.
+    """
+    from scipy.spatial import cKDTree
+
+    puntos_xy = np.asarray(puntos_xy, dtype=np.float64)
+    if puntos_xy.size == 0:
+        raise ValueError("no hay ningun sitio ceremonial que usar")
+
+    d, _ = cKDTree(puntos_xy).query(np.asarray(filcol_xy, dtype=np.float64))
+    return np.clip(d / float(saturacion), 0.0, 1.0)

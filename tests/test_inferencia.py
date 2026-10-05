@@ -137,3 +137,66 @@ def test_centroide_y_extension_del_conjunto():
 def test_centroide_de_un_conjunto_vacio_es_nan():
     red = np.array([[1.0, 0.0], [0.0, 1.0]])
     assert np.isnan(equifinalidad.centroide(red, np.zeros(2, dtype=bool))).all()
+
+
+# ------------------------------------------------- lectura de la sensibilidad
+
+def _filas(dominantes_por_n):
+    filas = []
+    for n, doms in dominantes_por_n.items():
+        for k, dom in enumerate(doms):
+            filas.append({"n_sectores": n, "sector": f"s{k+1}",
+                          "desde": k / n, "hasta": (k + 1) / n,
+                          "dominante": dom, "pendiente": 0.5,
+                          "rugosidad": 0.3, "drenaje": 0.2})
+    return filas
+
+
+def test_detecta_que_la_estructura_no_sobrevive_al_corte():
+    """Es el caso real: con 4 sectores manda la pendiente al principio y con
+    3, 5 y 6 manda la rugosidad en el mismo sitio."""
+    from camino import pipeline
+    filas = _filas({3: ["rugosidad", "pendiente", "drenaje"],
+                    4: ["pendiente", "pendiente", "rugosidad", "drenaje"],
+                    5: ["rugosidad", "rugosidad", "rugosidad", "drenaje", "drenaje"],
+                    6: ["rugosidad", "rugosidad", "drenaje", "rugosidad",
+                        "drenaje", "rugosidad"]})
+    assert pipeline._inestable(filas)
+
+
+def test_detecta_que_la_estructura_si_sobrevive():
+    from camino import pipeline
+    filas = _filas({3: ["pendiente", "pendiente", "drenaje"],
+                    4: ["pendiente", "pendiente", "pendiente", "drenaje"],
+                    6: ["pendiente", "pendiente", "pendiente", "pendiente",
+                        "drenaje", "drenaje"]})
+    assert not pipeline._inestable(filas)
+
+
+def test_con_una_sola_particion_no_se_puede_juzgar():
+    from camino import pipeline
+    assert not pipeline._inestable(_filas({4: ["pendiente"] * 4}))
+
+
+def test_las_figuras_se_dibujan_y_pesan_algo(tmp_path):
+    import numpy as np
+    from camino import figuras
+
+    filas = _filas({3: ["rugosidad", "pendiente", "drenaje"],
+                    4: ["pendiente", "pendiente", "rugosidad", "drenaje"]})
+    a = figuras.sensibilidad(tmp_path / "s.png", filas,
+                             ("pendiente", "rugosidad", "drenaje"), "titulo")
+    taus = np.linspace(0, 0.5, 26)
+    b = figuras.perfil_jaccard(tmp_path / "p.png", taus,
+                               {("s1", "s2"): np.linspace(0, 0.8, 26),
+                                ("s1", "s3"): np.zeros(26)}, "titulo")
+    assert a.stat().st_size > 10_000
+    assert b.stat().st_size > 10_000
+
+
+def test_cada_componente_lleva_siempre_el_mismo_color():
+    """El color codifica identidad: no puede cambiar entre figuras."""
+    from camino import figuras
+    assert figuras.COLOR["pendiente"] != figuras.COLOR["rugosidad"]
+    assert set(figuras.COLOR) >= {"pendiente", "rugosidad", "drenaje", "humedad"}
+    assert all(c.startswith("#") and len(c) == 7 for c in figuras.COLOR.values())

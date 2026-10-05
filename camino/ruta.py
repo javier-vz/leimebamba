@@ -24,7 +24,16 @@ import pathlib
 
 import requests
 
-FUENTES = ("geocam", "archivo", "osm")
+FUENTES = ("auto", "geocam", "archivo", "osm")
+
+# Extensiones de geometria que se reconocen en datos/, por orden de
+# preferencia: el KMZ/KML del registro trae las categorias del Ministerio y
+# es lo mejor que puede haber; el GPX del Garmin es lo ultimo porque es una
+# traza de campo, no el registro.
+EXTENSIONES = (".kmz", ".kml", ".gpkg", ".shp", ".geojson", ".json", ".gpx")
+
+# Archivos que produce el propio programa: no son fuentes de camino.
+PROPIOS = ("qn_geocam.gpkg", "agua_osm.json", "tracks.gpkg")
 
 # Extensiones que geopandas abre sin ayuda. El GPX trae varias capas y hay
 # que decirle cual.
@@ -95,6 +104,24 @@ def desde_osm(cfg, sesion=None):
     return g
 
 
+def busca_archivo(cfg):
+    """El mejor archivo de geometria que haya en datos/, o None.
+
+    Existe para que no haya que acordarse de una opcion: si dejaste el KMZ
+    del registro en la carpeta, el programa lo usa.
+    """
+    candidatos = []
+    for p in sorted(cfg.dir_datos.iterdir()):
+        if not p.is_file() or p.name in PROPIOS:
+            continue
+        ext = p.suffix.lower()
+        if ext in EXTENSIONES:
+            candidatos.append((EXTENSIONES.index(ext), p.name, p))
+    if not candidatos:
+        return None
+    return sorted(candidatos)[0][2]
+
+
 def filtra_tramo(cfg, qn):
     """Se queda con el tramo del registro que pide config.yaml.
 
@@ -112,8 +139,17 @@ def filtra_tramo(cfg, qn):
         print("\n  --- tramos del registro dentro de la caja ---")
         print(f"  {'tramo':34s} {'rasgos':>6s} {'km':>8s} {'continuo':>9s}")
         for nombre, n, km, mayor in inventario:
-            marca = " <--" if cfg.tramo and nombre == cfg.tramo else ""
+            if cfg.unidad == "tramo":
+                marca = " <--" if mayor >= cfg.largo_min_unidad else ""
+            else:
+                marca = " <--" if cfg.tramo and nombre == cfg.tramo else ""
             print(f"  {nombre[:34]:34s} {n:6d} {km:8.2f} {mayor:9.2f}{marca}")
+
+    if cfg.unidad == "tramo":
+        print("\n  unidad de analisis: TRAMO -- se comparan entre si los "
+              f"tramos\n  con al menos {cfg.largo_min_unidad / 1000:.0f} km "
+              "continuos. No se filtra a uno solo.")
+        return qn
 
     if not cfg.tramo:
         return qn
@@ -129,7 +165,7 @@ def filtra_tramo(cfg, qn):
     return sel.copy()
 
 
-def importar(cfg, fuente: str = "geocam", archivo=None, forzar: bool = False):
+def importar(cfg, fuente: str = "auto", archivo=None, forzar: bool = False):
     """Deja el camino observado en datos/qn_geocam.gpkg, venga de donde venga."""
     from . import descarga
 
@@ -137,6 +173,17 @@ def importar(cfg, fuente: str = "geocam", archivo=None, forzar: bool = False):
     if destino.exists() and not forzar:
         print(f"  ya esta: {destino.name}  (usa --forzar para rehacerlo)")
         return destino
+
+    if fuente == "auto" and not archivo:
+        hallado = busca_archivo(cfg)
+        if hallado is not None:
+            print(f"  encontrado en datos/: {hallado.name}")
+            fuente, archivo = "archivo", hallado
+        else:
+            print("  no hay ningun archivo de geometria en datos/; pruebo GeoCAM")
+            fuente = "geocam"
+    elif fuente == "auto":
+        fuente = "archivo"
 
     if fuente == "geocam":
         return descarga.camino_registrado(cfg, forzar=forzar)
@@ -151,6 +198,16 @@ def importar(cfg, fuente: str = "geocam", archivo=None, forzar: bool = False):
         qn = desde_osm(cfg)
     else:
         raise SystemExit(f"fuente desconocida: {fuente}. Usa una de {FUENTES}")
+
+    # ANTES de recortar: un grupo de 'tramnomb' repartido por medio pais
+    # parece local una vez cortado por la caja, y entonces ya no se puede
+    # distinguir de un tramo de verdad.
+    from . import registro as _registro
+    qn, _ = _registro.separa_los_que_no_son_tramos(cfg, qn)
+    if qn.empty:
+        raise SystemExit(
+            "despues de quitar los grupos que no son tramos no quedo nada; "
+            "revisa 'datos.tramos_excluidos' y 'datos.diagonal_max_tramo'")
 
     qn = descarga.recorta(qn, cfg)
     if qn.empty:

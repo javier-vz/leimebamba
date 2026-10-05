@@ -16,9 +16,10 @@ están en [`METODO.md`](METODO.md).
 3. [La llave de OpenTopography](#3-la-llave-de-opentopography-una-sola-vez)
 4. [Correr el estudio](#4-correr-el-estudio)
 5. [El camino observado: de dónde sale](#5-el-camino-observado-de-dónde-sale)
-6. [Qué mirar en los resultados](#6-qué-mirar-en-los-resultados)
-7. [Los parámetros](#7-los-parámetros)
-8. [Si algo falla](#8-si-algo-falla)
+6. [Los espacios ceremoniales: el archivo que falta](#6-los-espacios-ceremoniales-el-archivo-que-falta)
+7. [Qué mirar en los resultados](#7-qué-mirar-en-los-resultados)
+8. [Los parámetros](#8-los-parámetros)
+9. [Si algo falla](#9-si-algo-falla)
 
 ---
 
@@ -67,7 +68,7 @@ Tarda unos minutos la primera vez. Comprueba que quedó bien:
 python -m pytest -q
 ```
 
-Tienen que pasar **214 pruebas** en dos o tres segundos. Si falla algo aquí,
+Tienen que pasar **243 pruebas** en dos o tres segundos. Si falla algo aquí,
 falla antes de tocar datos, que es cuando conviene.
 
 > **Cada vez que abras la consola de nuevo**, dos cosas: `conda activate
@@ -101,7 +102,7 @@ al repositorio sin querer.
 
 ## 4. Correr el estudio
 
-Nueve pasos, en orden. Cada uno deja su resultado en disco, así que puedes
+Diez pasos, en orden. Cada uno deja su resultado en disco, así que puedes
 parar y seguir otro día sin perder nada.
 
 ```bash
@@ -113,7 +114,8 @@ python -m camino grafo          # 5
 python -m camino revisar        # 6
 python -m camino nulos          # 7
 python -m camino barrido        # 8
-python -m camino resultados     # 9
+python -m camino validar        # 9
+python -m camino resultados     # 10
 ```
 
 O `python -m camino todo` de corrido.
@@ -123,30 +125,91 @@ O `python -m camino todo` de corrido.
 | 1 | `bajar` | los dos modelos de elevación y los cuerpos de agua | `datos/cop30_raw.tif`, `datos/aw3d30_raw.tif`, `datos/agua_osm.json` | minutos, según la conexión |
 | 2 | `ruta` | el camino observado (ver §5) | `datos/qn_geocam.gpkg` | segundos |
 | 3 | `preparar` | pone los dos modelos en la misma rejilla, recorta el corredor | `derivados/cop30.tif`, `derivados/mascara.tif` | ~1 min |
-| 4 | `superficies` | pendiente, rugosidad, drenaje, humedad | `derivados/phi_*.tif` | 2–5 min |
-| 5 | `grafo` | el grafo de tránsito sobre el terreno | `derivados/grafo.npz` | 1–2 min |
-| 6 | `revisar` | traza **un** camino para que lo mires | `resultados/revision_pendiente.gpkg` | segundos |
-| 7 | `nulos` | el terreno aleatorio de comparación | `derivados/nulos.npz` | ~15 min |
-| 8 | `barrido` | prueba los 231 juegos de pesos, sector por sector | `resultados/optimos_por_sector.json` | ~30 min |
-| 9 | `resultados` | el perfil de equifinalidad y su gráfico | `resultados/perfil_equifinalidad.png` | segundos |
+| 4 | `superficies` | pendiente y aspecto; la rugosidad, como **restricción**, recorta la máscara; el drenaje queda de diagnóstico | `derivados/pendiente_rad.tif`, `rugosidad.tif`, `acumulacion.tif`, `mascara.tif` | 2–5 min |
+| 5 | `grafo` | el grafo de tránsito, con una columna por componente | `derivados/grafo.npz` | 1–2 min |
+| 6 | `revisar` | traza **un camino por unidad** para que los mires | `resultados/revision_pendiente.gpkg`, `revision_grafo.json` | segundos |
+| 7 | `nulos` | el terreno aleatorio de comparación, por unidad | `derivados/nulos.npz` | ~15 min |
+| 8 | `barrido` | corre **los dos modelos** sobre cada unidad y los compara | `resultados/optimos_por_unidad.json`, `caminos_optimos.gpkg` | ~30 min |
+| 9 | `validar` | la prueba que decide: pesos estimados sin un bloque, medidos **en** ese bloque | `resultados/validacion_bloqueada.json` | ~30 min |
+| 10 | `resultados` | el perfil de equifinalidad y su gráfico | `resultados/perfil_equifinalidad.png` | segundos |
 
 Los tiempos son estimaciones para un corredor de unos 350 000 píxeles en una
-laptop de ocho núcleos. Los dos largos (7 y 8) salen del cálculo que está en
+laptop de ocho núcleos. Los largos (7, 8 y 9) salen del cálculo que está en
 `METODO.md`, §5.
 
-### Dos cosas sobre el orden
+Los pasos 8 y 9 necesitan el archivo de espacios ceremoniales (§6). Sin él,
+avisan y te dicen qué hacer en vez de reventar.
 
-**`revisar` es el paso que no se salta.** Traza un solo camino, poniendo todo
-el peso en la pendiente, y lo guarda como GeoPackage. Ábrelo en QGIS encima
-del modelo de elevación y míralo con ojos de arqueóloga: ¿pasa por donde
-pasaría un camino?, ¿cruza las quebradas por donde se puede cruzar? Si ese
-camino no es plausible, ninguno de los siguientes lo será, y no hay
-estadística que lo arregle.
+### Tres ayudas que no son pasos
 
-**`nulos` va antes que `barrido`, y no es intercambiable.** Un sector cuyo
+No van en el orden: se corren cuando hacen falta.
+
+```bash
+python -m camino caja          # qué bbox haría falta para que los tramos
+                               # entren completos, y lo que costaría
+python -m camino buscar        # encuentra la dirección del servicio de GeoCAM
+python -m camino sensibilidad  # repite el barrido con otros cortes (sólo
+                               # tiene sentido con 'unidad: sector')
+```
+
+`caja` imprime una tabla **acumulada**: añade tramos de más barato a más
+caro y te dice, en cada fila, cuántas unidades completas tendrías, cuántas
+celdas y cuánta memoria pediría el grafo. Se eligen tramos, no coordenadas —
+copias el bbox de la fila que te convenga. Con *n* unidades completas salen
+*n(n−1)/2* pares para el perfil de equifinalidad: con 2 hay 1 par (no se
+contrasta nada), con 4 hay 6, con 6 hay 15.
+
+### Cuidado con `tramnomb`: no todos los valores son tramos
+
+El registro usa ese campo para dos cosas. Casi todos los valores son tramos
+("A – B"), pero **`En proceso` es un estado de trabajo del Ministerio** y
+aparece en rasgos repartidos por todo el país. Agrupado por nombre, su caja
+envolvente va de Ayacucho a Amazonas: 551 × 924 km. Si entra al análisis,
+propone una caja 180 veces más grande que la necesaria y pone a comparar los
+pesos de un camino con los de una etiqueta administrativa.
+
+El programa lo detecta por la diagonal y lo quita **antes** de recortar a la
+caja — una vez recortado, un grupo disperso parece local y ya no se
+distingue. Se ajusta con `datos.diagonal_max_tramo` (150 km por omisión) y
+`datos.tramos_excluidos`, para quitar alguno a mano.
+
+Si ya corriste `ruta` antes de esto, el `qn_geocam.gpkg` que tienes se hizo
+sin el filtro: vuelve a correr `python -m camino ruta --forzar`.
+
+### Tres cosas sobre el orden
+
+**`revisar` es el paso que no se salta.** Traza un camino por unidad con todo
+el peso en el costo físico y los guarda en un GeoPackage, con el observado al
+lado. Ábrelo en QGIS encima del modelo de elevación y míralos con ojos de
+arqueóloga: ¿pasan por donde pasaría un camino?, ¿cruzan las quebradas por
+donde se puede cruzar? Si no son plausibles, ninguno de los siguientes lo
+será, y no hay estadística que lo arregle.
+
+La tabla que imprime marca dos cosas, y las dos invalidan el número que está
+al lado:
+
+- `*` **la unidad está recortada por la caja** — uno de sus extremos no es un
+  destino, es donde cortamos. `python -m camino caja` dice cuánto habría que
+  ensanchar el bbox y lo que costaría en celdas y en memoria.
+- `B` **el camino se pegó al borde de su vecindad** — es el `buffer_corredor`
+  el que está decidiendo, no el terreno. Súbelo y vuelve a correr desde aquí.
+
+La D que imprime `revisar` se mide **en la misma vecindad** que va a usar el
+barrido, así que anticipa lo que el barrido va a reportar con
+`w_fisico = 1`. Si ahí ya sale mal, no hace falta gastar media hora en nulos.
+
+**`nulos` va antes que `barrido`, y no es intercambiable.** Una unidad cuyo
 mejor camino no le gana a terreno aleatorio no tiene pesos que valga la pena
-reportar. Al revés, se acaban comparando pesos de sectores donde el modelo no
+reportar. Al revés, se acaban comparando pesos de unidades donde el modelo no
 explica nada, y los números parecen válidos sin serlo.
+
+**`validar` no es opcional, es el resultado.** El paso 8 va a reportar que el
+modelo ampliado ajusta mejor que el de referencia. Eso **no significa nada**:
+tiene más parámetros, así que ajusta mejor por construcción sobre los mismos
+datos con que se estimaron sus pesos. El paso 9 estima los pesos dejando fuera
+un pedazo del trazado y los mide sobre ese pedazo, sin recalibrar. Si ahí el
+ampliado no gana, la mejora era capacidad de ajuste y la consola lo dice con
+esas palabras.
 
 ### Los pasos 1, 3 y 4 no necesitan el camino
 
@@ -197,8 +260,13 @@ no es una traza suelta: trae **las categorías con que el Ministerio clasifica
 cada segmento**, cada una en su propia capa. Ponlo en `datos/` y:
 
 ```bash
-python -m camino ruta --fuente archivo --archivo datos/qhapaq_nan.kmz
+python -m camino ruta
 ```
+
+**No hace falta ninguna opción**: si hay un archivo de geometría en `datos/`,
+el programa lo encuentra y lo usa; sólo si no hay ninguno intenta GeoCAM. Si
+tienes varios, prefiere el KMZ o KML del registro antes que un GPX de campo.
+Para forzar uno concreto: `--fuente archivo --archivo datos/X.kmz`.
 
 El programa lo abre, saca los atributos (que vienen escondidos en una tabla
 HTML dentro de cada placemark), imprime el inventario de tramos y se queda
@@ -238,7 +306,69 @@ recuerda al terminar. **No valen para publicar.**
 
 ---
 
-## 6. Qué mirar en los resultados
+## 6. Los espacios ceremoniales: el archivo que falta
+
+Es el **único dato de entrada que no se baja solo**, y de él salen las dos
+componentes del modelo ampliado. Sin él, los pasos 8 y 9 avisan y paran.
+
+Déjalo en `datos/` con un nombre que empiece por `sitios`:
+
+```
+datos/sitios.gpkg      datos/sitios.shp      datos/sitios.csv
+datos/sitios.geojson   datos/sitios.kmz
+```
+
+Un CSV basta, con una columna de nombre y las coordenadas en grados:
+
+```csv
+nombre,lon,lat
+Nombre del sitio,-77.925,-6.418
+```
+
+Acepta puntos y polígonos; de un polígono se toma su punto representativo (un
+recinto, a 30 m de resolución, es un punto). Si están en otro sistema de
+coordenadas, el programa lo reproyecta solo. Los sitios pueden caer **fuera de
+la caja**: uno a 2 km del borde sigue condicionando las celdas de dentro, y se
+usa igual.
+
+### Las dos reglas que hay que aplicar al armarlo
+
+Vienen del proyecto, no son técnicas, y cambian el resultado:
+
+1. **Un sitio que se reconoció *por* el camino no puede explicar el camino.**
+   Si la identificación de un lugar dependió principalmente de estar junto a
+   la vía, usarlo como predictor es circular. Esto el código **no lo puede
+   decidir**: es criterio arqueológico y se filtra al armar el archivo. Es la
+   decisión más importante de todo este paso.
+2. **Un sitio en el extremo del tramo analizado se excluye de su componente.**
+   Esta sí la hace el código, tramo por tramo (`ceremonial.radio_extremos`,
+   500 m por omisión), porque si no el modelo recibe como premio acercarse a un
+   punto al que tiene que llegar de todas formas. Te dice en la consola
+   cuántos quitó.
+
+### Qué pasa si no hay archivo
+
+El paso 8 corre igual con el modelo de referencia, que sólo usa el costo
+físico, y los pasos 1 a 7 no lo necesitan para nada. Lo que no se puede hacer
+sin él es la pregunta del proyecto.
+
+Si quieres correr todo sin sitios mientras llega el catálogo, quita las
+componentes del modelo ampliado en `config.yaml`:
+
+```yaml
+costo:
+  componentes_ampliado: [fisico]
+```
+
+### Los datos de campo no van al repositorio
+
+Los Excel de campo llevan coordenadas exactas de evidencias. **No subas los
+crudos.** `datos/` está en `.gitignore` por eso. Lo que se publica son los
+resultados, no las ubicaciones.
+
+---
+
+## 7. Qué mirar en los resultados
 
 **Al terminar el paso 2**, el programa imprime cuántos metros de *polilínea
 continua* trajo. Es el número que decide el diseño del estudio:
@@ -259,36 +389,95 @@ sector y además permite validación bloqueada —ajustar en los pares, medir en
 los impares—. Con 6 sectores bajarían a 2.07 km y empezarían a ser demasiado
 cortos para que los pesos signifiquen algo.
 
-**Al terminar el paso 8**, `resultados/optimos_por_sector.json` trae una fila
-por sector: los pesos óptimos, la distancia al camino observado, el valor *p*
-contra el nulo, y el rango de cada peso dentro del conjunto casi-óptimo. Ese
-rango es lo que se reporta en el texto — no «w_pendiente = 0.60» sino
-«w_pendiente entre 0.45 y 0.70».
+**Al terminar el paso 8**, `resultados/optimos_por_unidad.json` trae una fila
+por unidad con **los dos modelos lado a lado**:
 
-**Al terminar el paso 9**, `resultados/perfil_equifinalidad.png` es la figura
-principal: cómo se separan los conjuntos de pesos entre sectores. Dos
-sectores cuyas curvas se van abajo y se quedan abajo están gobernados por
-variables distintas. Dos que se solapan no se distinguen con estos datos, y
-eso también es un resultado.
+| campo | qué es |
+|---|---|
+| `D_referencia_m` | distancia media al camino observado, sólo costo físico |
+| `D_ampliado_m` | lo mismo, añadiendo el espacio ceremonial |
+| `mejora_pct` | cuánto baja — **y no es evidencia de nada, ver abajo** |
+| `w_*_ampliado` | los pesos óptimos del ampliado |
+| `*_tau10` | el **rango** de cada peso en el conjunto casi-óptimo |
+| `frechet_*_m` | la segunda métrica, la peor correspondencia |
+| `p_nulo` | contra terreno aleatorio |
+
+El rango es lo que se reporta en el texto: no «w_ceremonial = 0.35» sino
+«w_ceremonial entre 0.20 y 0.45». Y `caminos_optimos.gpkg` trae las
+geometrías —una por modelo y por unidad, más el observado— para abrirlas en
+QGIS y mirarlas encima del terreno.
+
+**`mejora_pct` no es un resultado.** El modelo ampliado tiene más parámetros,
+así que ajusta mejor por construcción sobre los mismos datos con que se
+estimaron sus pesos. Si se reporta esa cifra como evidencia de que el espacio
+ceremonial condiciona el trazado, el argumento es circular.
+
+**Al terminar el paso 9**, `resultados/validacion_bloqueada.json` trae lo que
+sí se puede reportar: para cada bloque retenido, `D_ajuste_m` (en los bloques
+con que se estimaron los pesos) y `D_retenido_m` (en el bloque que no vio). La
+consola resume en una línea **en cuántos bloques retenidos gana el ampliado**.
+Si gana en la mitad o menos, el resultado del estudio es que las componentes
+añadidas no aportan información espacial — y eso es un resultado publicable,
+no un fracaso.
+
+**Al terminar el paso 10**, `resultados/perfil_equifinalidad.png` es la figura
+principal: cómo se separan los conjuntos de pesos entre unidades. Dos unidades
+cuyas curvas se van abajo y se quedan abajo están gobernadas por variables
+distintas. Dos que se solapan no se distinguen con estos datos, y eso también
+es un resultado.
 
 ---
 
-## 7. Los parámetros
+## 8. Los parámetros
 
 Todos viven en `config.yaml`, cada uno con su comentario. Si un umbral
 aparece escrito dentro del código, es un error.
 
 Tres que probablemente toques:
 
-**`componentes`** — qué variables del terreno entran al modelo.
+**`unidad`** — qué se compara con qué. Es la decisión de diseño del estudio.
+
+```yaml
+barrido:
+  unidad: tramo          # o "sector"
+  largo_min_unidad: 8000
+```
+
+Con `tramo`, cada tramo con nombre del registro es una unidad: el Ministerio
+los registró y los nombró de forma independiente, así que comparar pesos
+entre ellos compara cosas que existen. Con `sector`, un solo tramo se corta en
+`n_sectores` pedazos iguales — sirve para preguntar si algo cambia *a lo
+largo* de un tramo, pero el resultado siempre carga con la sospecha de
+depender de dónde cayó el corte, y para eso está `python -m camino
+sensibilidad`.
+
+**`componentes_referencia` / `componentes_ampliado`** — los dos modelos que se
+comparan.
 
 ```yaml
 costo:
-  componentes: [pendiente, rugosidad, drenaje]
+  componentes_referencia: [fisico]
+  componentes_ampliado: [fisico, ceremonial]
 ```
 
-Con esas tres son 231 juegos de pesos y el barrido tarda media hora. Si
-añades `humedad`, pasan a 1771 y tarda unas dos horas. Empieza con tres.
+`fisico` es el costo metabólico de Minetti, la única componente anisotrópica
+(ir y volver no cuestan lo mismo). `ceremonial` es la proximidad a los
+espacios ceremoniales. Para añadir la intervisibilidad con esos mismos
+sitios:
+
+```yaml
+  componentes_ampliado: [fisico, ceremonial, visibilidad]
+```
+
+Con dos componentes son 21 juegos de pesos; con tres, 231, y el barrido pasa
+de segundos a media hora. Antes de encender `visibilidad`, lee la sección
+`visibilidad` de `config.yaml`: **en este corredor no hay apu documentado**,
+así que la componente mide otra cosa que en el proyecto del Coropuna.
+
+La rugosidad y el drenaje **ya no son componentes con peso**. La rugosidad es
+restricción (`restricciones.rugosidad_percentil`) y el drenaje es
+diagnóstico; así los dos modelos comparten el mismo espacio de tránsito y la
+diferencia entre ellos es atribuible a lo que se añadió.
 
 **`buffer_corredor`** — media anchura, en metros, de la franja alrededor del
 camino por donde el modelo puede buscar.
@@ -325,7 +514,7 @@ restricciones institucionales que correspondan.
 
 ---
 
-## 8. Si algo falla
+## 9. Si algo falla
 
 | Lo que dice la consola | Qué pasa |
 |---|---|
@@ -337,6 +526,7 @@ restricciones institucionales que correspondan.
 | `Ningún endpoint WFS respondió` | lo mismo; el programa ya probó cuatro rutas, dos veces |
 | `ninguna parece ser el camino` | mira la lista que imprime `buscar` y pon a mano la capa en `geocam_capa` |
 | `no tiene nada dentro de la caja del tramo` | bajó una capa que no es el camino, o el tramo no está digitalizado ahí |
+| `No hay camino entre los extremos` | el dominio está partido. El mensaje dice en qué componente cae cada extremo y qué suele causarlo; mira `derivados/mascara.tif` en QGIS |
 | `el camino modelado toca el borde del corredor` | sube `buffer_corredor` y vuelve a correr desde `preparar` |
 | `la pieza continua mide X m` | poco camino continuo para tantos sectores: baja `n_sectores` |
 

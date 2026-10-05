@@ -38,21 +38,39 @@ class Config:
     solo_observadas: bool    # excluir las capas de "Proyeccion..."
     capas_camino: tuple      # capas concretas, si se quieren fijar
     tramo: str               # tramo del registro a estudiar
+    tramos_excluidos: tuple  # grupos de 'tramnomb' que no son tramos
+    diagonal_max_tramo: float  # m; mas que esto no es un tramo
 
-    # modelo de costo
+    # modelo de costo: dos modelos con las mismas restricciones
     g_max: float
     epsilon: float
     percentiles: tuple[float, float]
-    componentes: tuple[str, ...]
+    componentes_referencia: tuple[str, ...]
+    componentes_ampliado: tuple[str, ...]
     vecindad: int
+
+    # restricciones geomorfologicas: delimitan, no pesan
+    rugosidad_percentil: float
+    ceremonial_archivo: str
+    ceremonial_saturacion: float
+    ceremonial_radio_extremos: float
+    visibilidad_radio: float
+    visibilidad_puntos: tuple
+    altura_observador: float
+    altura_objetivo: float
 
     # dominio
     buffer_corredor: float
+    area_min_laguna: float
     umbral_quebrada: float
 
     # barrido e inferencia
     n_simplex: int
+    unidad: str
+    largo_min_unidad: float
     n_sectores: int
+    n_bloques: int
+    largo_min_bloque: float
     m_nulos: int
     tau_max: float
     semilla: int
@@ -81,15 +99,43 @@ class Config:
             solo_observadas=bool(d["datos"].get("solo_observadas", True)),
             capas_camino=tuple(d["datos"].get("capas_camino") or ()),
             tramo=str(d["datos"].get("tramo") or ""),
+            tramos_excluidos=tuple(
+                str(x) for x in (d["datos"].get("tramos_excluidos") or ())),
+            diagonal_max_tramo=float(
+                d["datos"].get("diagonal_max_tramo", 150_000)),
             g_max=float(d["costo"]["g_max"]),
             epsilon=float(d["costo"]["epsilon"]),
             percentiles=tuple(float(v) for v in d["costo"]["percentiles"]),
-            componentes=tuple(d["costo"]["componentes"]),
+            componentes_referencia=tuple(d["costo"]["componentes_referencia"]),
+            componentes_ampliado=tuple(d["costo"]["componentes_ampliado"]),
             vecindad=int(d["costo"]["vecindad"]),
+            rugosidad_percentil=float(
+                d.get("restricciones", {}).get("rugosidad_percentil", 99.0)),
+            ceremonial_archivo=str(
+                d.get("ceremonial", {}).get("archivo") or ""),
+            ceremonial_saturacion=float(
+                d.get("ceremonial", {}).get("distancia_saturacion", 5000)),
+            ceremonial_radio_extremos=float(
+                d.get("ceremonial", {}).get("radio_extremos", 500)),
+            visibilidad_radio=float(
+                d.get("visibilidad", {}).get("radio", 8000)),
+            visibilidad_puntos=tuple(
+                d.get("visibilidad", {}).get("puntos") or ()),
+            altura_observador=float(
+                d.get("visibilidad", {}).get("altura_observador", 1.65)),
+            altura_objetivo=float(
+                d.get("visibilidad", {}).get("altura_objetivo", 0.0)),
             buffer_corredor=float(d["dominio"]["buffer_corredor"]),
+            area_min_laguna=float(
+                d.get("restricciones", {}).get("area_min_laguna", 50000)),
             umbral_quebrada=float(d["dominio"]["umbral_quebrada"]),
             n_simplex=int(d["barrido"]["n_simplex"]),
+            unidad=str(d["barrido"].get("unidad", "tramo")),
+            largo_min_unidad=float(d["barrido"].get("largo_min_unidad", 8000)),
             n_sectores=int(d["barrido"]["n_sectores"]),
+            n_bloques=int(d["barrido"].get("n_bloques", 4)),
+            largo_min_bloque=float(
+                d["barrido"].get("largo_min_bloque", 500)),
             m_nulos=int(d["barrido"]["m_nulos"]),
             tau_max=float(d["barrido"]["tau_max"]),
             semilla=int(d["barrido"]["semilla"]),
@@ -124,13 +170,36 @@ class Config:
         raise ValueError("la vecindad tiene que ser 8 o 16")
 
     @property
+    def modelos(self) -> dict[str, tuple[str, ...]]:
+        """Los dos modelos que se comparan, por nombre."""
+        return {"referencia": self.componentes_referencia,
+                "ampliado": self.componentes_ampliado}
+
+    @property
+    def componentes(self) -> tuple[str, ...]:
+        """Union de las componentes de los dos modelos, 'fisico' primera.
+
+        El grafo se construye UNA vez con todas; cada modelo se evalua
+        poniendo a cero los pesos de las que no usa. Asi los dos comparten
+        exactamente el mismo espacio de transito, que es lo que el proyecto
+        exige para que la diferencia sea atribuible a las componentes.
+        """
+        vistas = list(self.componentes_referencia)
+        for c in self.componentes_ampliado:
+            if c not in vistas:
+                vistas.append(c)
+        if "fisico" in vistas:
+            vistas.remove("fisico")
+        return ("fisico",) + tuple(vistas)
+
+    @property
     def k(self) -> int:
-        """Numero de componentes del costo, incluida la pendiente."""
         return len(self.componentes)
 
     @property
     def componentes_simetricas(self) -> tuple[str, ...]:
-        return tuple(c for c in self.componentes if c != "pendiente")
+        """Las que son propiedad de la celda, no del paso."""
+        return tuple(c for c in self.componentes if c != "fisico")
 
     def exige_llave(self) -> str:
         if not self.api_key:

@@ -85,7 +85,13 @@ def banda_incertidumbre(a, b) -> dict:
         return {}
     return {"mediana_m": round(float(np.median(d)), 2),
             "p90_m": round(float(np.percentile(d, 90)), 2),
-            "max_m": round(float(d.max()), 2)}
+            "p99_m": round(float(np.percentile(d, 99)), 2),
+            # El maximo lo fija siempre un pixel suelto (un vacio de datos,
+            # un borde, una pared vertical donde 30 m de desfase horizontal
+            # son cientos de metros verticales). El numero que va en el
+            # articulo es el p90; el maximo solo dice que hay outliers.
+            "max_m": round(float(d.max()), 2),
+            "pct_sobre_50m": round(100 * float((d > 50).mean()), 3)}
 
 
 # -------------------------------------------------------------- corredor
@@ -128,11 +134,113 @@ def mascara_corredor(cfg, camino, agua_geoms=None):
 
     dentro = ~geometry_mask(buffer, out_shape=(alto, ancho), transform=transform,
                             invert=False, all_touched=True)
+    n_corredor = int(dentro.sum())
+    if n_corredor == 0:
+        raise ValueError(
+            "El corredor no toca la rejilla. Suele ser que el camino quedo "
+            "fuera de la caja del estudio: revisa 'extension.bbox' y "
+            "'datos.tramo' en config.yaml.")
+
     if agua_geoms:
         agua = ~geometry_mask(list(agua_geoms), out_shape=(alto, ancho),
                               transform=transform, all_touched=True)
+        quita = int((dentro & agua).sum())
+        if quita > 0.5 * n_corredor:
+            # Senal de que las geometrias de agua vienen mal: lo normal es
+            # que los rios se lleven un porcentaje pequeno del corredor.
+            raise ValueError(
+                f"El agua se llevaria {100 * quita / n_corredor:.0f}% del "
+                f"corredor ({quita} de {n_corredor} celdas), lo que no es "
+                "creible. Revisa que las geometrias de agua esten en metros "
+                "y no en grados, o borra datos/agua_osm.json y sigue sin "
+                "ellas: es un insumo opcional.")
         dentro &= ~agua
+
     return dentro, transform
+
+
+def unidades(cfg, camino):
+    """Las unidades que se comparan entre si: tramos con nombre o sectores.
+
+    Dos formas de partir el problema, y la eleccion importa:
+
+    'tramo'   cada tramo del registro es una unidad. Son unidades REALES:
+              el Ministerio las registro y las nombro de forma
+              independiente, con su propia campana de prospeccion. Comparar
+              pesos entre ellas compara cosas que existen.
+
+    'sector'  un tramo se corta en n pedazos iguales. Los cortes no
+              corresponden a nada del terreno: son una raya que ponemos
+              nosotros. Sirve para preguntar si algo cambia A LO LARGO de un
+              tramo, pero un resultado por sectores siempre carga con la
+              sospecha de depender de donde cayo el corte.
+
+    Devuelve [(nombre, LineString)], con la pieza CONTINUA mayor de cada
+    unidad: un ajuste contra una linea con agujeros no significa nada.
+    """
+    if cfg.unidad == "sector":
+        return sectores(camino, cfg.n_sectores)
+    if cfg.unidad != "tramo":
+        raise ValueError("'unidad' tiene que ser 'tramo' o 'sector'")
+
+    if "tramnomb" not in camino.columns:
+        raise SystemExit(
+            "La fuente del camino no trae tramos con nombre (un GPX o unas "
+            "trazas de OSM no los traen).\nPon 'unidad: sector' en "
+            "config.yaml, o usa el KMZ del registro.")
+
+    salida = []
+    for nombre, g in camino.groupby(camino["tramnomb"].fillna("(sin nombre)")):
+        try:
+            piezas = lineas_unidas(g)
+        except ValueError:
+            continue
+        mayor = piezas[0]
+        if mayor.length >= cfg.largo_min_unidad:
+            salida.append((str(nombre), mayor))
+
+    if not salida:
+        raise SystemExit(
+            f"Ningun tramo llega a {cfg.largo_min_unidad / 1000:.1f} km "
+            "continuos.\nBaja 'largo_min_unidad' en config.yaml, o usa "
+            "'unidad: sector'.")
+    salida = sorted(salida, key=lambda u: -u[1].length)
+    avisa_recortadas(cfg, salida)
+    return salida
+
+
+def recortada_por_la_caja(cfg, geometria, margen_celdas: int = 2) -> bool:
+    """True si la unidad llega al borde de la caja del estudio.
+
+    Importa mas de lo que parece. Un tramo cortado por la caja tiene un
+    extremo INVENTADO: el modelo tiene que reproducir una ruta hasta un
+    punto que no es un destino, sino donde pusimos el limite. Y el corredor
+    tambien queda cortado ahi, asi que el camino puede ir forzado.
+    """
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    # Se mide contra la caja donde se RECORTO la geometria (bbox en grados,
+    # reproyectada), no contra la rejilla: la rejilla se redondea hacia
+    # afuera a multiplos de la resolucion, asi que queda un poco mas grande
+    # y el borde real cae dentro de ella.
+    caja = gpd.GeoSeries([box(*cfg.bbox)], crs="EPSG:4326").to_crs(cfg.crs)[0]
+    margen = margen_celdas * cfg.resolucion
+    return geometria.distance(caja.exterior) <= margen
+
+
+def avisa_recortadas(cfg, unidades_) -> list[str]:
+    """Avisa de las unidades que tocan el borde de la caja."""
+    tocadas = [n for n, geom in unidades_ if recortada_por_la_caja(cfg, geom)]
+    if tocadas:
+        print("\n  AVISO: estas unidades llegan al borde de la caja, asi que")
+        print("  uno de sus extremos no es un destino sino donde cortamos:")
+        for n in tocadas:
+            print(f"    - {n}")
+        print("  Opciones: ensanchar 'extension.bbox' para que entren")
+        print("  completas, o sacarlas del analisis. Mientras tanto, sus")
+        print("  pesos valen menos que los de las unidades completas.")
+    return tocadas
 
 
 def sectores(camino, n: int):

@@ -52,11 +52,46 @@ datos:
   # "Chillo - Chachapoyas": 23.0 km registrados, 12.4 km continuos.
   tramo: "Chillo - Chachapoyas"
 
+  # --- grupos de 'tramnomb' que NO son tramos ---
+  # El registro usa el campo del nombre del tramo para dos cosas. La mayoria
+  # de los valores son tramos de verdad ("A - B"). Pero "En proceso" es un
+  # ESTADO DE TRABAJO del Ministerio, y aparece en rasgos repartidos por todo
+  # el pais: agrupado por nombre, su caja envolvente va de Ayacucho a
+  # Amazonas, 551 x 924 km de diagonal.
+  #
+  # El programa los detecta por la diagonal y los quita ANTES de recortar a
+  # la caja (una vez recortado, un grupo disperso parece local). Esta lista
+  # es para quitar alguno a mano, por nombre exacto.
+  tramos_excluidos: []
+
+  # Diagonal maxima, en metros, de la caja envolvente de un tramo. El tramo
+  # con nombre mas largo que aparece por aqui es Chachapoyas - Jumbilla, con
+  # 61 km completos; 150 km deja aire de sobra y descarta los mil kilometros
+  # de "En proceso". Pon un numero enorme para desactivar la deteccion.
+  diagonal_max_tramo: 150000
+
   # --- alternativa, solo si el WFS no responde ---
   # Capa de ArcGIS REST, sin el /query final. README, paso 3, opcion C.
   geocam_servicio: ""
 
 costo:
+  # ---------------------------------------------------------------------
+  # DOS MODELOS, no uno. Es la arquitectura del proyecto: el de referencia
+  # representa el desplazamiento solo por el costo fisico; el ampliado le
+  # suma relaciones espaciales. Ambos corren con los MISMOS nodos de inicio
+  # y fin y las MISMAS restricciones, de modo que la diferencia sea
+  # atribuible a las componentes anadidas y no al espacio de transito.
+  #
+  # El de referencia es el caso restringido del ampliado con los pesos de
+  # las componentes extra en cero.
+  componentes_referencia: [fisico]
+  componentes_ampliado: [fisico, ceremonial]
+
+  # Para anadir la visibilidad, escribe:
+  #   componentes_ampliado: [fisico, ceremonial, visibilidad]
+  # Lee antes la seccion 'visibilidad' de mas abajo: en este corredor NO hay
+  # apu documentado, asi que la componente mide otra cosa que en el Coropuna.
+
   # Borde de validez del ajuste de Minetti et al. 2002. No es estetico:
   # fuera de +-0.45 la polinomial se dispara. Las aristas con |g| mayor se
   # ELIMINAN del grafo, no se recortan.
@@ -68,16 +103,87 @@ costo:
 
   # Escalado robusto de cada componente. Percentiles y no minimo-maximo: un
   # pixel de ruido en el DEM no debe fijar la escala de la superficie.
+  #
+  # Las reglas se definen sobre el DOMINIO COMUN y se mantienen constantes
+  # entre las unidades comparadas: normalizar cada tramo por separado haria
+  # que sus pesos no fueran comparables.
   percentiles: [5.0, 95.0]
-
-  # Las componentes del costo, en orden. "pendiente" tiene que ir primera y
-  # es la unica anisotropica. Empieza con tres (231 vectores de peso);
-  # agrega "humedad" para pasar a cuatro (1771).
-  componentes: [pendiente, rugosidad, drenaje]
 
   # 16 y no 8: con 8 vecinos los caminos solo giran en pasos de 45 grados y
   # se alargan hasta 8.2%. Con 16 el sesgo baja a 2.8%.
+  #
+  # DESVIACION DECLARADA respecto del proyecto, que especifica 8. Se puede
+  # poner 8 y comparar: es una de las decisiones de parametrizacion que el
+  # propio proyecto manda someter a analisis de sensibilidad.
   vecindad: 16
+
+# ---------------------------------------------------------------------
+# Restricciones geomorfologicas del transito.
+#
+# NO son componentes del costo y NO llevan peso: delimitan de forma
+# identica el espacio de transito de los dos modelos. Que la rugosidad
+# aparezca aqui y no como componente ponderada es deliberado -- es lo que
+# distingue "por aqui no se pasa" de "por aqui es caro pasar".
+restricciones:
+  # Percentil de rugosidad (VRM) por encima del cual una celda se considera
+  # intransitable: farallones rocosos y terreno desmoronado. 99 deja fuera
+  # el 1% mas roto del corredor. Pon 100 para desactivarlo.
+  rugosidad_percentil: 99.0
+
+  # Area minima, en m2, para que una laguna se considere infranqueable.
+  area_min_laguna: 50000
+
+  # Los RIOS no se enmascaran nunca: un rio enmascarado no se puede cruzar
+  # en ningun punto y el grafo queda partido en dos orillas.
+
+ceremonial:
+  # Archivo con los espacios ceremoniales documentados. Si se deja vacio,
+  # se busca en datos/ un archivo cuyo nombre empiece por "sitios".
+  archivo: ""
+
+  # Distancia, en metros, por encima de la cual da igual estar mas lejos.
+  # La componente satura ahi, para que un sitio aislado no domine la
+  # superficie de medio corredor.
+  distancia_saturacion: 5000
+
+  # REGLA DEL PROYECTO: los lugares cuya identificacion dependa
+  # principalmente del propio camino NO sirven como predictores, y un sitio
+  # en el extremo del tramo analizado se excluye de su componente. Lo
+  # segundo lo hace el codigo (radio_extremos); lo primero es criterio
+  # arqueologico y se filtra en el archivo de entrada.
+  radio_extremos: 500
+
+visibilidad:
+  # OJO: esta componente NO es la del Coropuna. Alla el referente es el
+  # nevado: un apu con nombre, con culto registrado y santuario de altura en
+  # la cumbre. Para el corredor del Utcubamba no hay nada equivalente
+  # documentado -- la documentacion de los sitios Chachapoya del valle
+  # describe una relacion con el paisaje en conjunto y sitios colocados para
+  # ser "muy visibles desde lejos", no un cerro tutelar.
+  #
+  # Asi que aqui la variable es la INTERVISIBILIDAD CON LOS PROPIOS ESPACIOS
+  # CEREMONIALES: la fraccion de sitios que se ven desde cada celda. Usa el
+  # mismo archivo que 'ceremonial', y las dos preguntan cosas distintas:
+  # pasar CERCA de un sitio frente a pasar DONDE SE VE.
+  #
+  # Se enciende anadiendo 'visibilidad' a costo.componentes_ampliado.
+
+  # Alcance maximo que se acredita, en metros. Mas alla no cuenta como
+  # visible: en ceja de selva una cuenca visual de 40 km es un artefacto del
+  # DEM y no una relacion que nadie haya tenido.
+  radio: 8000
+
+  # Puntos sueltos que se SUMAN a los sitios, en "lat,lon". Aqui va un cerro
+  # tutelar el dia que este documentado para este corredor. Vacio = solo los
+  # sitios del archivo.
+  puntos: []
+
+  altura_observador: 1.65   # m, quien camina
+  altura_objetivo: 0.0      # m sobre el terreno del sitio
+
+  # LIMITE QUE VA EN EL TEXTO, NO SE ESCONDE: sobre un DEM de 30 m esto es
+  # visibilidad potencial sobre TERRENO DESNUDO Y CON BUEN TIEMPO. No hay
+  # vegetacion en el modelo, y esto es bosque de neblina.
 
 dominio:
   # Media anchura del corredor alrededor del camino registrado, en metros.
@@ -96,7 +202,27 @@ barrido:
   # vectores y K=4 da 1771.
   n_simplex: 20
 
-  # Sectores en que se parte el camino registrado.
+  # QUE SE COMPARA CON QUE. Es la decision de diseno del estudio.
+  #
+  # "tramo"   cada tramo con nombre del registro es una unidad. Son unidades
+  #           REALES: el Ministerio las registro y las nombro de forma
+  #           independiente. Comparar pesos entre ellas compara cosas que
+  #           existen, no rayas que pusimos nosotros.
+  #
+  # "sector"  un solo tramo (el de 'datos.tramo') se corta en 'n_sectores'
+  #           pedazos iguales. Sirve para preguntar si algo cambia A LO
+  #           LARGO de un tramo, pero el resultado siempre carga con la
+  #           sospecha de depender de donde cayo el corte. Para eso esta
+  #           `python -m camino sensibilidad`.
+  unidad: tramo
+
+  # Largo continuo minimo, en metros, para que un tramo entre al analisis.
+  # Por debajo de ~8 km el camino de minimo costo tiene poco margen de
+  # maniobra y casi cualquier juego de pesos da lo mismo.
+  largo_min_unidad: 8000
+
+  # Sectores en que se parte el camino registrado. Solo se usa con
+  # 'unidad: sector'.
   #
   # Medido sobre el registro (KMZ de GEO GPS PERU, tramo Chillo-Chachapoyas):
   # 23.02 km repartidos en 3 piezas, la mayor de 12.40 km. Con 4 sectores
@@ -110,6 +236,20 @@ barrido:
   # Con 4 sectores ademas cabe la validacion bloqueada: ajustar en los pares
   # y medir en los impares.
   n_sectores: 4
+
+  # --- validacion bloqueada (paso 'validar') ---
+  # Bloques contiguos en que se parte cada unidad. Los pesos se estiman
+  # dejando fuera un bloque y se miden SOBRE ese bloque, sin recalibrar.
+  #
+  # Contiguos y no al azar: puntos espacialmente proximos comparten terreno,
+  # asi que repartirlos al azar entre ajuste y prueba filtra informacion y el
+  # modelo parece generalizar cuando solo esta recordando.
+  n_bloques: 4
+
+  # Largo minimo de un bloque, en metros. Por debajo de esto el bloque no
+  # tiene margen para distinguir un juego de pesos de otro, y la unidad se
+  # omite de la validacion (el programa lo dice).
+  largo_min_bloque: 500
 
   # Superficies nulas por sector. El piso del valor p es 1/(M+1): con 500
   # no se puede reportar p < 0.002, se reporta p = 0.002 con M = 500.

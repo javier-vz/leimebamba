@@ -20,12 +20,34 @@ $$c_{ij}(\mathbf{w}) \;=\; L_{ij}\sum_{k=1}^{K} w_k\,\varphi_k(i,j),
   estiman del camino observado.
 
 La restricción $\sum_k w_k = 1$ es la que hace comparables los pesos entre
-sectores. Sin ella, $\mathbf{w}$ y $2\mathbf{w}$ dan exactamente el mismo
-camino, el óptimo no es único, y la frase «en este sector manda la pendiente»
-no quiere decir nada. Con ella, los pesos viven en un símplex y «0.6 de
-pendiente» significa lo mismo en el sector 1 y en el sector 5.
+unidades. Sin ella, $\mathbf{w}$ y $2\mathbf{w}$ dan exactamente el mismo
+camino, el óptimo no es único, y la frase «en este tramo manda el costo
+físico» no quiere decir nada. Con ella, los pesos viven en un símplex y «0.6
+de físico» significa lo mismo en un tramo que en otro.
 
-Código: `camino/grafo.py`, método `Grafo.costos`.
+### Dos modelos, no uno
+
+La ecuación se instancia **dos veces**, y es la arquitectura del proyecto:
+
+| modelo | componentes | qué representa |
+|---|---|---|
+| **referencia** | $\varphi_{\text{fis}}$ | desplazamiento sólo por costo físico |
+| **ampliado** | $\varphi_{\text{fis}},\ \varphi_{\text{cer}}$ (y $\varphi_{\text{vis}}$ si se enciende) | le suma relaciones espaciales |
+
+El de referencia es **literalmente el caso restringido** del ampliado con los
+pesos de las componentes extra en cero, así que el grafo se construye una sola
+vez con todas las columnas y cada modelo se evalúa sobre la cara del símplex
+que le toca. Los dos corren con los mismos nodos de inicio y fin y las mismas
+restricciones, de modo que la diferencia sea atribuible a las componentes
+añadidas y no al espacio de tránsito.
+
+Lo que **no** se puede concluir de que el ampliado ajuste mejor: nada. Tiene
+más parámetros, así que ajusta mejor por construcción sobre los mismos datos
+con que se estimaron sus pesos. La prueba está en §8 ter, sobre bloques
+retenidos.
+
+Código: `camino/grafo.py`, método `Grafo.costos`; `camino/pipeline.py`,
+`red_del_modelo`.
 
 ## 2. La componente de pendiente, la única anisotrópica
 
@@ -73,26 +95,130 @@ interpretar.
 
 Código: `camino/costo.py`.
 
-## 3. Las componentes simétricas
+## 3. Las componentes simétricas: el espacio ceremonial
 
-Rugosidad, drenaje y humedad son propiedades de la celda, no del paso, así que
-la arista toma el promedio de sus dos extremos:
+Son propiedades de la celda y no del paso, así que la arista toma el promedio
+de sus dos extremos:
 
 $$\varphi_k(i,j) \;=\; \tfrac{1}{2}\left[\tilde\varphi_k(i) + \tilde\varphi_k(j)\right],
-\qquad k \in \{\text{rug},\ \text{dren},\ \text{hum}\}$$
+\qquad k \in \{\text{cer},\ \text{vis}\}$$
 
-Cada ráster se escala con **percentiles**, no con mínimo–máximo (un solo píxel
-de ruido en el DEM no debe fijar la escala de toda la superficie), y se
-desplaza para que nunca valga cero:
+Las dos salen del **mismo archivo de entrada** —los espacios ceremoniales
+documentados— y le preguntan cosas distintas: si lo que condiciona el trazado
+es pasar **cerca** de un sitio o pasar **donde se lo ve**. Por eso pueden
+entrar las dos al modelo ampliado sin ser redundantes, y por eso conviene
+mirar si sus pesos se reparten o si una se come a la otra.
 
-$$\tilde\varphi_k \;=\; \varepsilon + \operatorname{clip}\!\left(
-\frac{x_k - q_{05}(x_k)}{q_{95}(x_k) - q_{05}(x_k)},\ 0,\ 1\right),
-\qquad \varepsilon = 0.01$$
+Las dos arrastran las dos reglas de diseño del proyecto, que no son técnicas y
+sí cambian el resultado:
 
-El $\varepsilon$ no es cosmético: con aristas de costo cero, Dijkstra devuelve
-caminos degenerados que recorren kilómetros gratis.
+1. Un lugar cuya identificación dependa **principalmente del propio camino**
+   no sirve como predictor. Si un sitio se reconoció porque está junto a la
+   vía, usarlo para explicar por dónde va la vía es circular. Esto no lo puede
+   decidir el código: se filtra en el archivo de entrada, con criterio
+   arqueológico.
+2. Un espacio ceremonial que coincida con el **inicio o el término** del tramo
+   analizado se excluye de su componente. Si no, el modelo recibe como premio
+   acercarse a un punto al que de todas formas tiene que llegar, y la
+   componente mide el enunciado del problema en vez del paisaje. Esto sí lo
+   hace el código, por unidad.
 
-### 3.1 Pendiente y aspecto (insumo del VRM)
+Por la regla 2, **ninguna de las dos superficies es global**: se recalculan
+para cada unidad, porque en cada tramo quedan excluidos sitios distintos. Lo
+que se mantiene constante entre unidades es la **regla** de transformación
+—$d_{\text{sat}}$ y el radio de visibilidad—, que es lo que exige el proyecto
+para que los pesos sean comparables.
+
+Las dos van en el mismo sentido —**más valor = más penalización**—, que es lo
+que hace que «0.4 de ceremonial» signifique lo mismo que «0.4 de visibilidad».
+
+El $\varepsilon = 0.01$ que llevan sumado no es cosmético: con aristas de costo
+cero, Dijkstra devuelve caminos degenerados que recorren kilómetros gratis.
+
+### 3.1 Proximidad
+
+$$\tilde\varphi_{\text{cer}}(i) \;=\; \varepsilon + \operatorname{clip}\!\left(
+\frac{d_{\min}(i)}{d_{\text{sat}}},\ 0,\ 1\right),
+\qquad d_{\text{sat}} = 5000\ \text{m}$$
+
+con $d_{\min}(i)$ la distancia euclidiana de la celda al sitio pertinente más
+próximo. Satura, y no crece sin límite, porque sin saturar un sitio aislado
+domina la superficie de medio corredor.
+
+Se calcula con un **árbol de vecinos y no con una transformada de distancia**
+porque los sitios pueden caer *fuera* de la caja: un santuario a 2 km del
+borde sigue condicionando las celdas de dentro, y la transformada sólo propaga
+desde semillas que estén en la rejilla.
+
+### 3.2 Visibilidad: la que **no** se transfiere tal cual
+
+En el proyecto del Coropuna la visibilidad tiene un referente único y
+documentado: el nevado. Es un apu con nombre, con culto registrado y con
+santuario de altura en la cumbre, así que «ver el apu» es una variable bien
+definida y la cuenca visual se calcula desde un punto.
+
+**En el corredor del Utcubamba no hay nada equivalente.** La documentación de
+los sitios Chachapoya del valle no describe ningún cerro tutelar con nombre:
+describe una relación con el paisaje en conjunto, con sitios colocados sobre
+afloramientos y farallones prominentes —los más inaccesibles, pero muy
+visibles desde lejos— y estructuras funerarias en cornisas visibles de un lado
+a otro del valle. La dirección de la mirada está **invertida** respecto del
+Coropuna: lo que se hace visible es el sitio, no la montaña.
+
+Así que la forma que sí se transfiere es la **intervisibilidad con los propios
+espacios ceremoniales**: la fracción de sitios pertinentes que se ven desde
+cada celda.
+
+$$\tilde\varphi_{\text{vis}}(i) \;=\; \varepsilon + 1 - \frac{1}{|P|}
+\sum_{p \in P} \mathbb{1}\!\left[\,p \text{ visible desde } i\,\right]$$
+
+Ver sale barato y no ver sale caro, para ir en el mismo sentido que la
+proximidad. Sólo cuentan los sitios a menos de un **radio** (8 km por
+omisión): en ceja de selva una cuenca visual de 40 km es un artefacto del DEM
+y no una relación que nadie haya tenido.
+
+La línea de vista se muestrea a paso de media celda con interpolación
+bilineal del DEM, y el terreno intermedio se corrige por curvatura y
+refracción sobre la cuerda entre los dos extremos:
+
+$$\Delta z(d_p) \;=\; (1-k)\,\frac{d_p\,(d - d_p)}{2R},
+\qquad k = 0.13,\ R = 6371\ \text{km}$$
+
+El terreno **sube** respecto de la recta, no baja: la cuerda entre dos puntos
+de la esfera pasa por dentro, así que el suelo de en medio se interpone. Es
+algebraicamente lo mismo que restarle $(1-k)d^2/2R$ a la cota del objetivo,
+que es como lo escriben GRASS y ArcGIS. Se comprueba con dos puntos a cota 0
+sobre llano: el despeje queda positivo, o sea tapado, que es lo correcto —dos
+puntos al nivel del mar no se ven. A 8 km de cuerda la corrección es 1.1 m en
+el punto medio; a 15 km, 3.8 m. Poco, pero del mismo orden que el error
+vertical del DEM, así que no se tira. Para un observador de 1.65 m sobre
+terreno llano fija el horizonte en 4.9 km, que es el número clásico.
+
+**El límite va en el texto, no escondido**: sobre un DEM de 30 m esto es
+visibilidad *potencial sobre terreno desnudo y con buen tiempo*. No hay
+vegetación en el modelo, y esto es bosque de neblina con cobertura cerrada
+buena parte del año. Es una idealización, igual que el resto del modelo, y el
+proyecto ya la enmarca como «una hipótesis de modelamiento y no como evidencia
+directa de intencionalidad histórica».
+
+Si algún día aparece un cerro tutelar documentado para este corredor, va en
+`visibilidad.puntos` de la config y se suma a los sitios sin tocar el código.
+La lista está vacía **a propósito**.
+
+Código: `camino/sitios.py`, `camino/visibilidad.py`, `camino/superficies.py`.
+
+---
+
+## 3 bis. Las superficies de terreno que **no** llevan peso
+
+Pendiente, rugosidad y drenaje se calculan, se guardan y se miran, pero no son
+componentes ponderadas del costo. La rugosidad es **restricción** —por un
+farallón no se pasa, no es que sea caro— y el drenaje es **diagnóstico**. Lo
+que delimita el espacio de tránsito no recibe peso y no se optimiza: es
+idéntico para los dos modelos, y es eso lo que permite atribuir las
+diferencias a las componentes añadidas y no al espacio por donde se puede ir.
+
+### 3.1 bis Pendiente y aspecto (insumo del VRM)
 
 Ventana 3×3 de Horn, sobre el DEM **sin rellenar**:
 
@@ -104,7 +230,7 @@ $$S = \arctan\sqrt{\left(\frac{\partial z}{\partial E}\right)^2 + \left(\frac{\p
 \qquad
 A = \operatorname{atan2}\!\left(-\frac{\partial z}{\partial E},\ -\frac{\partial z}{\partial N}\right)$$
 
-### 3.2 Rugosidad: VRM, no TRI
+### 3.2 bis Rugosidad: VRM, no TRI, y como restricción
 
 $$\mathbf{n} = \big(\sin S \sin A,\ \ \sin S \cos A,\ \ \cos S\big)$$
 
@@ -115,12 +241,25 @@ con $W$ la ventana 3×3 y $|W| = 9$ (Sappington *et al.* 2007). $\mathrm{VRM}
 quebrado.
 
 Se usa esto y no el TRI a propósito. **El TRI es casi una función de la
-pendiente**: como componente aparte haría que dos de los pesos midieran lo
-mismo y el óptimo dejaría de ser único. El VRM separa *qué tan inclinado* de
-*qué tan desordenado*. Hay una prueba que lo fija: sobre un plano inclinado el
-VRM es cero exactamente, por inclinado que esté.
+pendiente**, así que como umbral dejaría fuera las cuestas empinadas pero
+caminables, que es justo por donde van los caminos de herradura. El VRM separa
+*qué tan inclinado* de *qué tan desordenado*. Hay una prueba que lo fija:
+sobre un plano inclinado el VRM es cero exactamente, por inclinado que esté.
 
-### 3.3 Agua: drenaje y anegamiento
+Y entra como **restricción**, no como peso:
+
+$$\text{celda transitable} \iff \mathrm{VRM} \le q_{99}\!\left(\mathrm{VRM}\right)$$
+
+El percentil 99 deja fuera el 1% más roto del corredor: farallones y terreno
+desmoronado. Es la frontera entre «por aquí no se pasa» y «por aquí es caro
+pasar», y ponerla aquí en vez de en el costo tiene una consecuencia que
+importa: **los dos modelos comparten exactamente el mismo espacio de
+tránsito**. Si la rugosidad llevara peso, el modelo ampliado podría ganarle al
+de referencia simplemente porque le cambia por dónde se puede ir, y la
+comparación no diría nada sobre el espacio ceremonial. Se desactiva poniendo
+`rugosidad_percentil: 100`.
+
+### 3.3 bis Agua: drenaje y anegamiento
 
 Aquí sí, y **sólo aquí**, el DEM rellenado. Rellenar depresiones borra
 concavidades reales del terreno; usado para la pendiente, inventa planicies.
@@ -130,9 +269,15 @@ que impone gradiente dentro de cada depresión rellenada: sin eso el D8 no sabe
 hacia dónde drenar en el fondo de un lago. Después, direcciones D8 y
 acumulación exacta recorriendo las celdas en orden decreciente de elevación.
 
-Costo de cruzar un drenaje, que crece con el área que drena por la celda:
+Dificultad de cruzar un drenaje, que crece con el área que drena por la celda:
 
-$$\varphi_{\text{dren}} = \log_{10}\!\big(1 + A_{\text{celdas}}\big)$$
+$$\phi_{\text{dren}} = \log_{10}\!\big(1 + A_{\text{celdas}}\big)$$
+
+Se calcula y se guarda (`derivados/acumulacion.tif`), pero **no lleva peso**:
+es diagnóstico. Está ahí porque es lo que explica por qué los ríos no se
+enmascaran —el Utcubamba sale carísimo por esta vía sin necesidad de
+prohibirlo— y porque un tramo que el modelo no explica suele pasar por donde
+esta superficie tiene algo que decir.
 
 Y el anegamiento del suelo, que en bosque de neblina es lo que la pendiente no
 ve:
@@ -161,8 +306,18 @@ error clásico de la vecindad 16 y hace que los caminos salten acantilados y
 ríos.
 
 La **máscara** saca del dominio: las celdas sin ninguna arista con
-$|g| \le g_{\max}$, los cuerpos de agua permanentes, y un corredor alrededor
-del camino registrado. El corredor existe por cómputo —la caja completa son
+$|g| \le g_{\max}$, las lagunas, y un corredor alrededor del camino
+registrado.
+
+**Los ríos no se enmascaran**, y es una decisión, no un descuido. Un río
+enmascarado es un río que no se puede cruzar en ningún punto: el grafo queda
+partido en dos orillas y no existe camino entre ellas. Los caminos incas
+cruzaban ríos por puentes y vados, y no sabemos dónde estaban. Cruzar un río
+no es imposible, es caro — y eso ya lo recoge la componente de drenaje,
+$\varphi_{\text{dren}} = \log_{10}(1 + A)$, que crece justo con el tamaño
+del cauce. El Utcubamba sale carísimo por esa vía, sin necesidad de
+prohibirlo. Una laguna sí es infranqueable, así que los polígonos de agua
+cerrados por encima de un tamaño mínimo se quedan fuera del dominio. El corredor existe por cómputo —la caja completa son
 3.5 millones de celdas y no se barren— pero un buffer estrecho **decide** el
 resultado. De ahí el chequeo de `revisar`: si el camino modelado toca el borde
 del corredor, hay que ensancharlo. Es una línea de código y se olvida siempre.
@@ -267,6 +422,73 @@ D_H\big(P_s(\mathbf{w}),\ Q_s\big)$$
 
 Código: `camino/metricas.py`.
 
+## 6 ter. El dominio de cada unidad, y por qué `revisar` se mide ahí
+
+Cada unidad se analiza en **su propia vecindad**: los nodos a menos de
+`buffer_corredor` de su trazado. No sobre el corredor completo, y hay dos
+razones.
+
+La primera es el nulo. La pregunta que tiene que responder es «¿una ruta
+cualquiera **por aquí** se habría parecido tanto al trazado observado?», y
+«por aquí» sólo significa algo dentro de la vecindad del tramo. Un nulo sobre
+el corredor entero compara contra rutas que pasan por sitios donde nunca
+hubo nada que ver.
+
+La segunda es que el corredor completo es la **unión de los buffers de todos
+los tramos registrados** —142 km en 28 piezas en esta caja—, así que es una
+mancha conexa. Un camino de mínimo costo entre los extremos de un tramo puede
+irse por el buffer de otro y volver, y la distancia resultante no mide nada.
+
+Esto último era un error en `revisar`: corría un solo Dijkstra sobre el
+corredor entero, así que su diagnóstico no era comparable con lo que después
+iba a reportar el barrido. Ahora usa el mismo subgrafo, y el número que
+imprime sí anticipa el del barrido con $w_{\text{fis}} = 1$.
+
+Dos avisos que acompañan a cada unidad, y que invalidan su número:
+
+- **recortada por la caja**: el trazado llega al borde del bbox, así que uno
+  de sus extremos es un artefacto del encuadre y no un destino. En la caja
+  actual le pasa a cuatro de las seis unidades. `python -m camino caja` mide
+  qué bbox haría falta y lo que cuesta.
+- **pegada al borde de su vecindad**: el `buffer_corredor` es el que está
+  decidiendo el trazado, no el terreno. Existe por cómputo —el área completa
+  no se puede barrer— pero si es él el que manda, el resultado es suyo.
+
+## 6 bis. Qué se compara con qué
+
+La pregunta —¿manda lo mismo en todo el tramo?— exige partir el camino en
+unidades, y de qué sean esas unidades depende lo que se puede afirmar.
+
+**Tramos del registro.** Cada tramo con nombre es una unidad. Son unidades
+reales: el Ministerio las registró y las nombró de forma independiente, con
+su propia campaña de prospección. Comparar pesos entre ellas compara cosas
+que existen fuera del análisis.
+
+**Sectores.** Un tramo se corta en $n$ pedazos iguales. Los cortes no
+corresponden a nada del terreno. Sirven para preguntar si algo cambia *a lo
+largo* de un tramo, pero un resultado por sectores arrastra siempre la
+sospecha de depender de dónde cayó el corte. Por eso el paquete incluye una
+prueba de sensibilidad: repetir el barrido con 3, 4, 5 y 6 sectores y graficar
+el peso de cada componente **contra la posición a lo largo del camino**, que
+sí es comparable entre particiones. Si las curvas se superponen, la estructura
+es del terreno; si cada corte dice otra cosa, era del corte.
+
+Dos condiciones que una unidad tiene que cumplir:
+
+- **Ser continua.** Se usa la pieza continua mayor de cada unidad. Ajustar
+  contra una línea con agujeros no significa nada.
+- **No tocar el borde de la caja.** Una unidad cortada por el límite del
+  estudio tiene un extremo inventado: el modelo debe reproducir una ruta hasta
+  un punto que no es un destino sino donde pusimos el límite, y el corredor
+  también queda cortado ahí. El paquete las detecta y avisa.
+
+Cada unidad se analiza además en **su propia vecindad**: se extrae el
+subgrafo de los nodos a menos de `buffer_corredor` de esa unidad. No es solo
+por velocidad —el coste de un Dijkstra crece con el grafo entero— sino porque
+el nulo debe preguntar «una ruta cualquiera *por aquí*, ¿se habría parecido
+tanto?», y «por aquí» es la vecindad de esa unidad, no el área de estudio
+completa.
+
 ## 7. Equifinalidad: el resultado de verdad
 
 El óptimo puntual **no es el hallazgo**. Con datos reales, ese punto es ruido:
@@ -342,10 +564,65 @@ El paquete excluye las tres por omisión (`datos.solo_observadas` en
 `config.yaml`). En el tramo Chillo–Chachapoyas excluirlas no cuesta nada:
 las proyecciones no alargan ni un metro la pieza continua mayor.
 
+### Y `tramnomb` tampoco siempre nombra un tramo
+
+El mismo campo lleva dos clases de valor. Casi todos son tramos, con forma
+«A – B», pero **`En proceso` es un estado de trabajo**, no un lugar, y
+aparece en rasgos de todo el país. Agrupado por nombre, su caja envolvente
+mide 551 × 924 km de diagonal.
+
+No es cosmético: si ese grupo pasa el filtro de longitud entra al análisis
+como unidad, y entonces el perfil de equifinalidad compara los pesos de un
+camino con los de una etiqueta administrativa. El filtro es la diagonal en
+términos absolutos —el tramo con nombre más largo por aquí es
+Chachapoyas–Jumbilla con 61 km— y no la dispersión relativa (diagonal
+partido por longitud), porque los tramos del registro vienen en pedazos con
+huecos y su diagonal ya excede su longitud, así que la razón relativa no
+separa limpiamente.
+
+Se aplica **antes** de recortar a la caja. Después, un grupo repartido por
+el país parece local y la información que lo delataba está perdida.
+
 Si en algún momento interesa usarlas, es para otra pregunta: contrastar por
 dónde pasa el camino de mínimo costo contra por dónde se proyectó el tramo
 perdido. Eso es una validación del registro, no un ajuste del modelo, y los
 pesos tienen que venir ya fijados desde los sectores observados.
+
+---
+
+## 8 ter. Validación bloqueada: la prueba que decide
+
+El nulo de §8 responde «¿este trazado se parece al observado más que una ruta
+cualquiera por aquí?». No responde la otra pregunta, que es la del proyecto:
+**¿el espacio ceremonial aporta algo, o el ampliado gana sólo por tener más
+parámetros?**
+
+Para eso, por cada unidad:
+
+1. Se parte el trazado en $B = 4$ **bloques contiguos**.
+2. Los pesos se estiman minimizando $\bar D$ sobre los $B-1$ bloques restantes.
+3. Esos pesos, **sin recalibrar**, se evalúan sobre el bloque retenido.
+4. Se repite con cada bloque como retenido, y se comparan los dos modelos
+   bloque a bloque.
+
+$$\mathbf{w}^{(-k)} = \arg\min_{\mathbf{w}\in\Delta}
+\ \frac{1}{B-1}\sum_{b \ne k} D_b(\mathbf{w}),
+\qquad\text{se reporta } D_k\!\left(\mathbf{w}^{(-k)}\right)$$
+
+**Bloques contiguos y no una partición aleatoria**, y esto no es un detalle:
+puntos espacialmente próximos comparten terreno, así que repartirlos al azar
+entre ajuste y prueba filtra información de un lado al otro y el modelo parece
+generalizar cuando sólo está recordando. Es el error estándar en validación de
+modelos espaciales.
+
+El resultado que vale es el conteo: **en cuántos de los bloques retenidos gana
+el ampliado**. Si gana en la mitad o menos, la mejora que §5 reportaba era
+capacidad de ajuste y no información espacial, y el paquete lo dice con esas
+palabras en la consola. Es el único sitio del método donde el resultado puede
+ser «las componentes añadidas no aportan», y tiene que poder serlo: si ningún
+resultado posible refuta la hipótesis, no se está probando nada.
+
+`python -m camino validar`. Código: `camino/pipeline.py`, `validar`.
 
 ## 9. Lo que este diseño no hace
 
@@ -354,10 +631,19 @@ pesos tienen que venir ya fijados desde los sectores observados.
 - **No prueba intención.** Que la pendiente explique un sector no significa que
   quien lo trazó estuviera minimizando energía: significa que el trazado es
   compatible con eso y no con las alternativas probadas.
-- **No ve lo que no está en el DEM.** Visibilidad hacia huacas, tenencia de
-  tierras, nieve estacional, un puente que ya no existe. Un sector mal
-  explicado por las cuatro variables puede estar bien explicado por algo que no
-  está medido, y conviene decirlo así en lugar de subir $K$ hasta que encaje.
+- **No ve lo que no está en los datos de entrada.** Tenencia de tierras,
+  estacionalidad, un puente que ya no existe, un sitio que nadie registró. Una
+  unidad mal explicada puede estarlo por algo que no está medido, y conviene
+  decirlo así en lugar de subir $K$ hasta que encaje.
+- **No mide visibilidad real.** La componente de §3.2 es visibilidad potencial
+  sobre terreno desnudo: ignora la vegetación —en bosque de neblina, con
+  cobertura cerrada— y la niebla. Y no hay apu documentado para este corredor,
+  así que mide intervisibilidad con los sitios y no «ver la montaña»: es otra
+  variable que la del Coropuna, con el mismo nombre.
+- **Depende del archivo de sitios tanto como del DEM.** Las dos componentes del
+  modelo ampliado salen de ahí. Un catálogo incompleto, o uno que incluya
+  sitios reconocidos *por* el camino, no da un resultado peor: da un resultado
+  con la misma pinta y sin contenido.
 - **Hereda el DEM.** La banda de incertidumbre vertical entre Copernicus y
   AW3D30 (que `preparar` calcula y guarda) dice cuánta de la variación del
   costo de pendiente es terreno y cuánta es la fuente elegida. Va en el
@@ -377,16 +663,16 @@ pesos tienen que venir ya fijados desde los sectores observados.
 - Tobler, W. (1993). *Three presentations on geographical analysis and
   modeling.* NCGIA Technical Report 93-1 — la función de marcha del contraste.
 - Horn, B. K. P. (1981). Hill shading and the reflectance map.
-  *Proceedings of the IEEE* 69(1), 14–47 — la ventana 3×3 de §3.1.
+  *Proceedings of the IEEE* 69(1), 14–47 — la ventana 3×3 de §3.1 bis.
 - Sappington, J. M., Longshore, K. M. & Thompson, D. B. (2007). Quantifying
   landscape ruggedness for animal habitat analysis. *Journal of Wildlife
-  Management* 71(5), 1419–1426 — el VRM de §3.2.
+  Management* 71(5), 1419–1426 — el VRM de §3.2 bis.
 - Beven, K. J. & Kirkby, M. J. (1979). A physically based, variable
   contributing area model of basin hydrology. *Hydrological Sciences Bulletin*
-  24(1), 43–69 — el TWI de §3.3.
+  24(1), 43–69 — el TWI de §3.3 bis.
 - Barnes, R., Lehman, C. & Mulla, D. (2014). Priority-flood: an optimal
   depression-filling and watershed-labeling algorithm for digital elevation
-  models. *Computers & Geosciences* 62, 117–127 — el relleno de §3.3.
+  models. *Computers & Geosciences* 62, 117–127 — el relleno de §3.3 bis.
 - Eiter, T. & Mannila, H. (1994). *Computing discrete Fréchet distance.*
   Technical Report CD-TR 94/64, TU Wien — la recursión de §6.
 

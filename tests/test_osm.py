@@ -178,3 +178,86 @@ def test_la_mascara_se_arma_igual_sin_el_archivo_de_agua(cfg, tmp_path, monkeypa
     from camino import pipeline
     monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
     assert pipeline._agua_geoms(cfg) == []
+
+
+# ------------------------------------ el agua, en metros y no en grados
+
+def _agua_json(tmp_path):
+    """Una respuesta de Overpass con un rio (linea) y una laguna (poligono)."""
+    import json
+    d = {"elements": [
+        {"id": 1, "type": "way", "tags": {"waterway": "river", "name": "Utcubamba"},
+         "geometry": [{"lon": -77.88, "lat": -6.40}, {"lon": -77.87, "lat": -6.35},
+                      {"lon": -77.86, "lat": -6.30}]},
+        {"id": 2, "type": "way", "tags": {"natural": "water", "name": "Laguna"},
+         "geometry": [{"lon": -77.90, "lat": -6.50}, {"lon": -77.89, "lat": -6.50},
+                      {"lon": -77.89, "lat": -6.49}, {"lon": -77.90, "lat": -6.49},
+                      {"lon": -77.90, "lat": -6.50}]},
+    ]}
+    (tmp_path / "agua_osm.json").write_text(json.dumps(d), encoding="utf-8")
+
+
+def test_los_rios_no_se_enmascaran(cfg, tmp_path, monkeypatch):
+    """Un rio enmascarado parte el grafo en dos orillas sin camino posible.
+    Cruzarlo es caro -- de eso se encarga la componente de drenaje -- no
+    imposible."""
+    from camino import pipeline
+    monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
+    _agua_json(tmp_path)
+
+    geoms = pipeline._agua_geoms(cfg)
+    assert len(geoms) == 1               # solo la laguna; el rio no entra
+
+
+def test_las_areas_se_miden_en_metros_no_en_grados(cfg, tmp_path, monkeypatch):
+    """Si se midieran en grados cuadrados, la laguna 'mediria' 0.0001 y
+    caeria por debajo de cualquier umbral razonable."""
+    from camino import pipeline
+    monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
+    _agua_json(tmp_path)
+    (laguna,) = pipeline._agua_geoms(cfg)
+    assert 0.5e6 < laguna.area < 3e6     # ~1.2 km2, en metros cuadrados
+
+
+def test_las_lagunas_pequenas_se_descartan(cfg, tmp_path, monkeypatch):
+    from camino import pipeline
+    monkeypatch.setattr(type(cfg), "dir_datos", property(lambda s: tmp_path))
+    _agua_json(tmp_path)
+    exigente = type(cfg)(**{**cfg.__dict__, "area_min_laguna": 1e8})
+    assert pipeline._agua_geoms(exigente) == []
+
+
+
+
+
+def test_la_mascara_se_niega_si_el_agua_se_come_el_corredor(cfg):
+    """La comprobacion que habria cazado el bug en el acto."""
+    import geopandas as gpd
+    import pytest
+    from camino import preparar
+    from shapely.geometry import LineString, box
+
+    oeste, sur, este, norte = cfg.bbox
+    linea = gpd.GeoDataFrame(
+        {"n": [1]},
+        geometry=[LineString([(-77.86, -6.50), (-77.87, -6.30)])],
+        crs="EPSG:4326").to_crs(cfg.crs)
+    # "agua" del tamano de toda la caja: justo lo que producia el bug
+    enorme = gpd.GeoSeries([box(oeste, sur, este, norte)],
+                           crs="EPSG:4326").to_crs(cfg.crs)[0]
+
+    with pytest.raises(ValueError, match="no es creible"):
+        preparar.mascara_corredor(cfg, linea, [enorme])
+
+
+def test_la_mascara_avisa_si_el_camino_cae_fuera_de_la_caja(cfg):
+    import geopandas as gpd
+    import pytest
+    from camino import preparar
+    from shapely.geometry import LineString
+
+    lejos = gpd.GeoDataFrame(
+        {"n": [1]}, geometry=[LineString([(-70.0, -12.0), (-70.1, -12.1)])],
+        crs="EPSG:4326").to_crs(cfg.crs)
+    with pytest.raises(ValueError, match="no toca la rejilla"):
+        preparar.mascara_corredor(cfg, lejos)
