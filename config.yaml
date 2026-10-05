@@ -1,0 +1,295 @@
+# Parametros del estudio. Todo numero discutible vive aqui.
+# Tramo Leimebamba - Chachapoyas, Amazonas.
+#
+# Este archivo viene en el paquete, asi que al descomprimir una version
+# nueva se reemplaza. Si lo tenias editado, lo que mas importa es el bbox:
+# el programa SE PARA si el bbox no coincide con los rasteres que hay en
+# derivados/, y te dice cual es cual, asi que no puede pasar en silencio.
+
+# La version del paquete con la que se escribio este archivo. Si no coincide
+# con la del programa, se avisa: puede que haya parametros nuevos.
+version: "0.13.0"
+
+extension:
+  # LA CAJA DEL ESTUDIO, decidida con `python -m camino caja` el 5-oct-2026.
+  #
+  # No es la caja minima del tramo Leimebamba - Chachapoyas: es la que hace
+  # que entren COMPLETOS los seis tramos del registro que pasan el filtro de
+  # 8 km continuos. Con la caja minima solo Chillo - Chachapoyas entraba
+  # entero, y con una sola unidad completa el perfil de equifinalidad se
+  # queda en un par, o sea sin nada que contrastar. Con seis hay 15 pares.
+  #
+  # Cuesta 6.44 millones de celdas (2.0x la caja minima) y 0.76 GB de grafo.
+  # Lo que crece es solo lo de UNA vez (bajar, preparar, superficies, grafo):
+  # el barrido y la validacion trabajan sobre la vecindad de cada unidad.
+  #
+  # Crece al este por los dos tramos que van a Mendoza y al norte por
+  # Chachapoyas - Jumbilla. Deja 4 km de aire alrededor de los extremos, que
+  # es 'dominio.buffer_corredor': con menos, la mascara del corredor queda
+  # recortada por el borde justo donde el tramo termina.
+  #
+  # Si cambias esto, tienes que rehacer los derivados:
+  #     python -m camino bajar --forzar
+  #     python -m camino ruta  --forzar
+  #     python -m camino todo
+  # El programa se para si no coinciden, pero mejor no llegar ahi.
+  bbox:
+    oeste: -78.05
+    sur: -6.8
+    este: -77.549
+    norte: -5.869
+  crs: EPSG:32718          # UTM 18S, metrico: las distancias salen en metros
+  resolucion: 30           # m, la del Copernicus GLO-30
+
+datos:
+  # Dejala vacia y usa la variable de entorno OPENTOPOGRAPHY_API_KEY, para
+  # que la llave no acabe en el control de versiones.
+  api_key_opentopography: ""
+
+  # --- GeoCAM: la via PREFERIDA es el WFS ---
+  # GeoCAM publica sus capas bajo el estandar OGC (seccion "Servicios web" de
+  # su pagina: WMS, WFS, KML). El WFS es el que devuelve los vectores, y es
+  # un GeoServer. Ya viene puesto el endpoint global, que es el que responde
+  # cuando el del workspace 'cultura' esta caido.
+  #
+  # OJO: ese servidor esta detras de un proxy que falla a ratos con un 500
+  # ("Error during SSL Handshake with remote server"). No es un error de tu
+  # peticion: el programa reintenta y prueba rutas alternativas.
+  geocam_wfs: "https://geoservicios.cultura.gob.pe/geoserver/wfs"
+
+  # Nombre de la capa dentro de ese WFS. Dejalo vacio y corre
+  # `python -m camino buscar`: lista las capas publicadas y rellena esta
+  # linea con la que mas se parezca al camino.
+  geocam_capa: ""
+
+  # --- que parte del registro cuenta como camino OBSERVADO ---
+  # El registro clasifica cada segmento. Las capas de "Proyeccion de Camino
+  # por Reemplazo / Danos / Ausencia" son tramos donde el camino YA NO ESTA
+  # y la linea la dibujo alguien infiriendo por donde iba. Ajustar el modelo
+  # contra una linea proyectada es circular: recuperas los supuestos de quien
+  # la proyecto, no el comportamiento de quien construyo el camino.
+  solo_observadas: true
+
+  # Capas concretas, si quieres fijarlas a mano. Vacio = las cuatro
+  # observadas (Trazo de Camino, Camino Registrado, Camino Identificado,
+  # Camino Afectado).
+  capas_camino: []
+
+  # Tramo del registro a estudiar. Vacio = todos los que caigan en la caja.
+  # En la caja de Leimebamba-Chachapoyas, el que corresponde es
+  # "Chillo - Chachapoyas": 23.0 km registrados, 12.4 km continuos.
+  tramo: "Chillo - Chachapoyas"
+
+  # --- grupos de 'tramnomb' que no son tramos ---
+  # El registro usa el campo del nombre del tramo para dos cosas. La mayoria
+  # de los valores son tramos ("A - B"), pero tambien hay estados de trabajo
+  # del Ministerio y rasgos sin nombre, que agrupados dan "tramos" de mil
+  # kilometros de diagonal.
+  #
+  # Se excluyen A MANO, por nombre exacto, y no con una regla automatica.
+  # Hubo una regla automatica (descartar por diagonal mayor que 150 km) y
+  # estaba mal: descarto como "no son tramos" a Xauxa - Pachacamac, La Raya -
+  # Desaguadero, Pumpu - Pallasca y Acostambo - Huamachuco, que son secciones
+  # reales del Qhapaq Nan de entre 163 y 588 km, varias inscritas en la
+  # UNESCO. El registro es nacional y hay tramos con nombre de cientos de
+  # kilometros: ninguna regla geometrica los separa de una etiqueta con
+  # garantias. El programa MIDE la dispersion y AVISA; la decision es
+  # arqueologica y queda escrita aqui.
+  #
+  # El KMZ de GEO GPS PERU trae estos tres, con el nombre repetido en dos
+  # grafias distintas:
+  tramos_excluidos:
+    - ""                 # rasgos sin nombre de tramo
+    - "En proceso"
+    - "En Proceso"
+
+  # --- alternativa, solo si el WFS no responde ---
+  # Capa de ArcGIS REST, sin el /query final. README, paso 3, opcion C.
+  geocam_servicio: ""
+
+costo:
+  # ---------------------------------------------------------------------
+  # DOS MODELOS, no uno. Es la arquitectura del proyecto: el de referencia
+  # representa el desplazamiento solo por el costo fisico; el ampliado le
+  # suma relaciones espaciales. Ambos corren con los MISMOS nodos de inicio
+  # y fin y las MISMAS restricciones, de modo que la diferencia sea
+  # atribuible a las componentes anadidas y no al espacio de transito.
+  #
+  # El de referencia es el caso restringido del ampliado con los pesos de
+  # las componentes extra en cero.
+  componentes_referencia: [fisico]
+  componentes_ampliado: [fisico, ceremonial]
+
+  # Para anadir la visibilidad, escribe:
+  #   componentes_ampliado: [fisico, ceremonial, visibilidad]
+  # Lee antes la seccion 'visibilidad' de mas abajo: en este corredor NO hay
+  # apu documentado, asi que la componente mide otra cosa que en el Coropuna.
+
+  # Borde de validez del ajuste de Minetti et al. 2002. No es estetico:
+  # fuera de +-0.45 la polinomial se dispara. Las aristas con |g| mayor se
+  # ELIMINAN del grafo, no se recortan.
+  g_max: 0.45
+
+  # Desplazamiento que impide costos nulos. Con aristas de costo cero,
+  # Dijkstra devuelve caminos degenerados.
+  epsilon: 0.01
+
+  # Escalado robusto de cada componente. Percentiles y no minimo-maximo: un
+  # pixel de ruido en el DEM no debe fijar la escala de la superficie.
+  #
+  # Las reglas se definen sobre el DOMINIO COMUN y se mantienen constantes
+  # entre las unidades comparadas: normalizar cada tramo por separado haria
+  # que sus pesos no fueran comparables.
+  percentiles: [5.0, 95.0]
+
+  # 16 y no 8: con 8 vecinos los caminos solo giran en pasos de 45 grados y
+  # se alargan hasta 8.2%. Con 16 el sesgo baja a 2.8%.
+  #
+  # DESVIACION DECLARADA respecto del proyecto, que especifica 8. Se puede
+  # poner 8 y comparar: es una de las decisiones de parametrizacion que el
+  # propio proyecto manda someter a analisis de sensibilidad.
+  vecindad: 16
+
+# ---------------------------------------------------------------------
+# Restricciones geomorfologicas del transito.
+#
+# NO son componentes del costo y NO llevan peso: delimitan de forma
+# identica el espacio de transito de los dos modelos. Que la rugosidad
+# aparezca aqui y no como componente ponderada es deliberado -- es lo que
+# distingue "por aqui no se pasa" de "por aqui es caro pasar".
+restricciones:
+  # Percentil de rugosidad (VRM) por encima del cual una celda se considera
+  # intransitable: farallones rocosos y terreno desmoronado. 99 deja fuera
+  # el 1% mas roto del corredor. Pon 100 para desactivarlo.
+  rugosidad_percentil: 99.0
+
+  # Area minima, en m2, para que una laguna se considere infranqueable.
+  area_min_laguna: 50000
+
+  # Los RIOS no se enmascaran nunca: un rio enmascarado no se puede cruzar
+  # en ningun punto y el grafo queda partido en dos orillas.
+
+ceremonial:
+  # Archivo con los espacios ceremoniales documentados. Si se deja vacio,
+  # se busca en datos/ un archivo cuyo nombre empiece por "sitios".
+  archivo: ""
+
+  # Distancia, en metros, por encima de la cual da igual estar mas lejos.
+  # La componente satura ahi, para que un sitio aislado no domine la
+  # superficie de medio corredor.
+  distancia_saturacion: 5000
+
+  # REGLA DEL PROYECTO: los lugares cuya identificacion dependa
+  # principalmente del propio camino NO sirven como predictores, y un sitio
+  # en el extremo del tramo analizado se excluye de su componente. Lo
+  # segundo lo hace el codigo (radio_extremos); lo primero es criterio
+  # arqueologico y se filtra en el archivo de entrada.
+  radio_extremos: 500
+
+visibilidad:
+  # OJO: esta componente NO es la del Coropuna. Alla el referente es el
+  # nevado: un apu con nombre, con culto registrado y santuario de altura en
+  # la cumbre. Para el corredor del Utcubamba no hay nada equivalente
+  # documentado -- la documentacion de los sitios Chachapoya del valle
+  # describe una relacion con el paisaje en conjunto y sitios colocados para
+  # ser "muy visibles desde lejos", no un cerro tutelar.
+  #
+  # Asi que aqui la variable es la INTERVISIBILIDAD CON LOS PROPIOS ESPACIOS
+  # CEREMONIALES: la fraccion de sitios que se ven desde cada celda. Usa el
+  # mismo archivo que 'ceremonial', y las dos preguntan cosas distintas:
+  # pasar CERCA de un sitio frente a pasar DONDE SE VE.
+  #
+  # Se enciende anadiendo 'visibilidad' a costo.componentes_ampliado.
+
+  # Alcance maximo que se acredita, en metros. Mas alla no cuenta como
+  # visible: en ceja de selva una cuenca visual de 40 km es un artefacto del
+  # DEM y no una relacion que nadie haya tenido.
+  radio: 8000
+
+  # Puntos sueltos que se SUMAN a los sitios, en "lat,lon". Aqui va un cerro
+  # tutelar el dia que este documentado para este corredor. Vacio = solo los
+  # sitios del archivo.
+  puntos: []
+
+  altura_observador: 1.65   # m, quien camina
+  altura_objetivo: 0.0      # m sobre el terreno del sitio
+
+  # LIMITE QUE VA EN EL TEXTO, NO SE ESCONDE: sobre un DEM de 30 m esto es
+  # visibilidad potencial sobre TERRENO DESNUDO Y CON BUEN TIEMPO. No hay
+  # vegetacion en el modelo, y esto es bosque de neblina.
+
+dominio:
+  # Media anchura del corredor alrededor del camino registrado, en metros.
+  # Si el camino modelado toca el borde, es el buffer el que esta decidiendo
+  # el resultado: hay que ensancharlo. El codigo avisa.
+  buffer_corredor: 4000
+
+  # Celdas de area acumulada a partir de las cuales una celda es quebrada.
+  # 500 celdas a 30 m = 0.45 km2. Es el UNICO parametro del modelo que el
+  # trabajo de campo fija directamente: se calibra contra las quebradas que
+  # realmente haya que cruzar.
+  umbral_quebrada: 500
+
+barrido:
+  # Paso de la red del simplex: h = 1/n_simplex. Con 20, K=3 da 231
+  # vectores y K=4 da 1771.
+  n_simplex: 20
+
+  # QUE SE COMPARA CON QUE. Es la decision de diseno del estudio.
+  #
+  # "tramo"   cada tramo con nombre del registro es una unidad. Son unidades
+  #           REALES: el Ministerio las registro y las nombro de forma
+  #           independiente. Comparar pesos entre ellas compara cosas que
+  #           existen, no rayas que pusimos nosotros.
+  #
+  # "sector"  un solo tramo (el de 'datos.tramo') se corta en 'n_sectores'
+  #           pedazos iguales. Sirve para preguntar si algo cambia A LO
+  #           LARGO de un tramo, pero el resultado siempre carga con la
+  #           sospecha de depender de donde cayo el corte. Para eso esta
+  #           `python -m camino sensibilidad`.
+  unidad: tramo
+
+  # Largo continuo minimo, en metros, para que un tramo entre al analisis.
+  # Por debajo de ~8 km el camino de minimo costo tiene poco margen de
+  # maniobra y casi cualquier juego de pesos da lo mismo.
+  largo_min_unidad: 8000
+
+  # Sectores en que se parte el camino registrado. Solo se usa con
+  # 'unidad: sector'.
+  #
+  # Medido sobre el registro (KMZ de GEO GPS PERU, tramo Chillo-Chachapoyas):
+  # 23.02 km repartidos en 3 piezas, la mayor de 12.40 km. Con 4 sectores
+  # salen 3.10 km cada uno, unas 103 celdas de 30 m: suficiente para que el
+  # camino de minimo costo tenga margen de maniobra dentro del sector.
+  #
+  # Con 6 sectores bajarian a 2.07 km (69 celdas), que empieza a ser poco:
+  # en un sector corto casi cualquier juego de pesos da el mismo camino y el
+  # conjunto casi-optimo se hincha sin que signifique nada.
+  #
+  # Con 4 sectores ademas cabe la validacion bloqueada: ajustar en los pares
+  # y medir en los impares.
+  n_sectores: 4
+
+  # --- validacion bloqueada (paso 'validar') ---
+  # Bloques contiguos en que se parte cada unidad. Los pesos se estiman
+  # dejando fuera un bloque y se miden SOBRE ese bloque, sin recalibrar.
+  #
+  # Contiguos y no al azar: puntos espacialmente proximos comparten terreno,
+  # asi que repartirlos al azar entre ajuste y prueba filtra informacion y el
+  # modelo parece generalizar cuando solo esta recordando.
+  n_bloques: 4
+
+  # Largo minimo de un bloque, en metros. Por debajo de esto el bloque no
+  # tiene margen para distinguir un juego de pesos de otro, y la unidad se
+  # omite de la validacion (el programa lo dice).
+  largo_min_bloque: 500
+
+  # Superficies nulas por sector. El piso del valor p es 1/(M+1): con 500
+  # no se puede reportar p < 0.002, se reporta p = 0.002 con M = 500.
+  m_nulos: 500
+
+  # Margen maximo del perfil de equifinalidad: S(tau) con tau en [0, este].
+  tau_max: 0.5
+
+  semilla: 20261005
+  n_trabajos: -1           # -1 = todos los nucleos
