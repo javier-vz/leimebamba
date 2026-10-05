@@ -121,64 +121,151 @@ llave no acabe subida al repositorio sin querer.
 
 ---
 
-## Paso 3 — Conseguir la dirección del servicio de GeoCAM
+## Paso 3 — La dirección de GeoCAM (ya viene puesta)
 
-GeoCAM, el visor del Ministerio de Cultura, funciona sobre un servidor ArcGIS.
-Ese servidor tiene una dirección que se puede consultar desde un programa, pero
-la página no la muestra en ningún sitio. Hay que sacarla del navegador. Se hace
-una sola vez y queda guardada.
+GeoCAM publica sus capas bajo el **estándar OGC**: es la sección «Servicios
+web» de su página, con los iconos de WMS, WFS y KML. El WFS es el que
+devuelve los vectores, y es la vía por la que entra el programa — una
+interfaz documentada y estable, no una dirección sacada a mano del tráfico
+del navegador.
 
-1. Abre <https://geocam.cultura.gob.pe/> en Chrome o Firefox.
-2. Pulsa `F12`. Se abre un panel de herramientas de desarrollo.
-3. En ese panel, entra a la pestaña **Network** (o **Red**).
-4. En la casilla de filtro escribe `query`.
-5. Vuelve al mapa y acércate a Chachapoyas, hasta que se dibujen las capas del
-   camino. Verás que en el panel van apareciendo líneas nuevas.
-6. Haz clic derecho sobre una de esas líneas → **Copy** → **Copy URL**.
-7. Pégala en un bloc de notas. Será algo larguísimo, parecido a esto:
+El servidor es un GeoServer en `geoservicios.cultura.gob.pe`, y **el endpoint
+ya viene escrito en `config.yaml`**:
 
-   ```
-   https://geocam.cultura.gob.pe/server/rest/services/QhapaqNan/MapServer/2/query?f=json&where=1%3D1&outFields=*...
-   ```
+```yaml
+datos:
+  geocam_wfs: "https://geoservicios.cultura.gob.pe/geoserver/wfs"
+```
 
-8. **Recorta todo desde `/query` en adelante**, incluido el `/query`. Te tiene
-   que quedar sólo esto:
+Así que en principio no tienes que tocar nada aquí. Sólo falta saber cuál de
+las capas publicadas es la del camino, y eso lo averigua el programa:
+
+```bash
+python -m camino buscar
+```
+
+Lista las capas del WFS, las ordena de más a menos probable y escribe la
+primera en la línea `geocam_capa` de `config.yaml`. Si funciona, pasa al
+paso 4.
+
+### El error 500: es del Ministerio, no tuyo
+
+Ese servidor está detrás de un proxy que falla a ratos. Lo que sale es esto:
+
+> **Proxy Error** — The proxy server could not handle the request
+> `GET /geoserver/cultura/ows`.
+> Reason: **Error during SSL Handshake with remote server**
+
+Eso **no es un error de tu petición**: es el proxy del Ministerio, que no
+consigue hablar con su propio GeoServer. Comprobado desde fuera: falla igual,
+y de forma intermitente — la misma dirección contesta un minuto y falla al
+siguiente. También cambia según la ruta: cuando `/geoserver/cultura/ows` da
+500, `/geoserver/wfs` a veces responde.
+
+Por eso el programa, en lugar de rendirse al primer intento:
+
+- prueba cuatro rutas distintas del servidor, empezando por la más fiable;
+- reintenta cada petición con espera creciente;
+- y repite el barrido entero una segunda vez antes de darse por vencido.
+
+Si aun así dice que ningún endpoint respondió, está caído de verdad. Espera
+un rato y vuelve a correr `python -m camino buscar`. No hay nada que arreglar
+de tu lado.
+
+### Si GeoCAM no vuelve: el camino puede venir de otro sitio
+
+El servidor del Ministerio se cae, y cuando se cae no hay nada que hacer
+desde aquí. El resto del estudio no tiene por qué quedarse parado: el camino
+observado puede entrar desde tres sitios.
+
+```bash
+python -m camino ruta                                  # de GeoCAM (lo correcto)
+python -m camino ruta --fuente archivo --archivo X.shp # de un archivo tuyo
+python -m camino ruta --fuente osm                     # apaño provisional
+```
+
+**Un archivo tuyo** es la salida más práctica mientras tanto. Vale un
+shapefile, un KML, un GeoPackage, un GeoJSON o un GPX; el programa lo
+reproyecta y lo recorta solo. Tres formas de conseguir uno:
+
+- **GEO GPS PERÚ** publica el Qhapaq Ñan nacional en shapefile y KMZ,
+  descarga directa desde Google Drive:
+  <https://www.geogpsperu.com/2020/10/mapa-del-qhapaq-nan-camino-inca.html>
+  Ojo: la página no dice de qué año es ni de dónde salió exactamente. Sirve
+  para trabajar ya, pero antes de publicar hay que contrastarlo con GeoCAM.
+- **Los tracks de Dina**, cuando vuelva del campo. El `.gpx` del Garmin entra
+  directo: `python -m camino ruta --fuente archivo --archivo datos/gpx/dia1.gpx`
+- **Digitalizarlo tú** en QGIS sobre una imagen satelital y guardarlo como
+  GeoPackage.
+
+**OpenStreetMap** (`--fuente osm`) baja las trazas etiquetadas como
+`historic` o con «inca» / «qhapaq» en el nombre. Es un **apaño** para que el
+código corra de punta a punta: son trazas de voluntarios, sin control de
+precisión ni criterio arqueológico. El programa las marca como
+`osm_provisional` y te lo recuerda al terminar. No valen para publicar.
+
+**Y mientras tanto, sigue trabajando.** Los tres primeros pasos no necesitan
+el camino para nada:
+
+```bash
+python -m camino bajar
+python -m camino preparar
+python -m camino superficies
+```
+
+Son los que más tardan —las descargas, el relleno de depresiones, la
+acumulación de flujo— y dejan todo listo. Si al correr `preparar` todavía no
+hay camino, usa la caja entera como dominio y te lo dice. A partir de
+`grafo` sí hace falta.
+
+### La última opción: sacar la dirección del tráfico del navegador
+
+Sólo si GeoCAM vuelve a estar en pie pero `buscar` no la encuentra. Es lo más
+engorroso y por eso va al final.
+
+**Para abrir el panel de desarrollo.** El atajo habitual es `F12`, pero en
+muchos portátiles —ASUS entre ellos— esa tecla la tiene tomada el fabricante
+y abre su propia utilidad. Tres alternativas:
+
+- **`Ctrl` + `Shift` + `I`** — funciona en Chrome, Edge y Firefox y no depende
+  de las teclas F. Es la que conviene usar.
+- **`Fn` + `F12`** — si tu teclado tiene las teclas F en modo multimedia.
+  (`Fn` + `Esc` suele alternar los dos modos de forma permanente.)
+- **Por menú, sin atajos** — en Chrome o Edge: los tres puntos de arriba a la
+  derecha → *Más herramientas* → *Herramientas para desarrolladores*. En
+  Firefox: el menú ☰ → *Más herramientas* → *Herramientas para
+  desarrolladores*.
+
+**Y luego:**
+
+1. Abre <https://geocam.cultura.gob.pe/> con el panel abierto al lado.
+2. En el panel, pestaña **Network** (en español, **Red**).
+3. En la casilla de filtro escribe `query`.
+4. Acércate a Chachapoyas en el mapa, hasta que se dibujen las capas del
+   camino. En el panel irán apareciendo líneas: son las peticiones que el
+   visor le hace a su servidor.
+5. Clic derecho sobre una de ellas → *Copy* → *Copy URL*.
+6. Pégala en un bloc de notas y **recorta todo desde `/query` en adelante**,
+   el `/query` incluido. Te queda algo así:
 
    ```
    https://geocam.cultura.gob.pe/server/rest/services/QhapaqNan/MapServer/2
    ```
 
-Eso es lo que hay que guardar.
+7. Eso va en `config.yaml`, en la línea `geocam_servicio`.
 
-### Dónde se guarda
-
-Abre `config.yaml` con cualquier editor de texto (el Bloc de notas sirve).
-Busca estas líneas, que están cerca del principio:
+### Las tres líneas de config.yaml, para ubicarte
 
 ```yaml
 datos:
-  api_key_opentopography: ""
+  api_key_opentopography: ""     # vacía: la llave va en la consola (paso 2)
 
-  geocam_servicio: ""
+  geocam_wfs: "https://geoservicios.cultura.gob.pe/geoserver/wfs"
+  geocam_capa: ""                # la rellena `python -m camino buscar`
+
+  geocam_servicio: ""            # sólo si el WFS no vuelve
 ```
 
-Y pon tu dirección entre las comillas de `geocam_servicio`, así:
-
-```yaml
-datos:
-  api_key_opentopography: ""
-
-  geocam_servicio: "https://geocam.cultura.gob.pe/server/rest/services/QhapaqNan/MapServer/2"
-```
-
-`api_key_opentopography` se queda vacío: esa va en la consola, como viste en el
-paso 2.
-
-Guarda el archivo y listo. Si te pierdes en algún punto, corre
-`python -m camino geocam` sin haber configurado nada: el programa imprime estos
-mismos pasos en la pantalla.
-
----
 
 ## Paso 4 — Correr el estudio
 
@@ -326,8 +413,11 @@ que correspondan.
 |---|---|
 | `ModuleNotFoundError` | falta `conda activate camino` |
 | `Falta la llave de OpenTopography` | el `set OPENTOPOGRAPHY_API_KEY=...` del paso 2, en esta misma ventana |
-| `Falta la URL del servicio de GeoCAM` | el paso 3; el propio mensaje repite las instrucciones |
-| `GeoCAM no devolvió ningún rasgo` | la dirección apunta a una capa que no es la del camino. Vuelve al paso 3 y prueba otra de las peticiones que aparecen en el panel Network |
+| `Falta la dirección de GeoCAM` | el paso 3; el propio mensaje repite las dos vías |
+| `Proxy Error … SSL Handshake` | el proxy del Ministerio, caído a ratos. No es tuyo: espera y repite `python -m camino buscar` |
+| `Ningún endpoint WFS respondió` | lo mismo: el servidor está caído en este momento. El programa ya probó cuatro rutas, dos veces |
+| `El WFS publica N capas pero ninguna parece ser el camino` | mira la lista que imprime `buscar` y pon a mano la que reconozcas en `geocam_capa` |
+| `no tiene nada dentro de la caja del tramo` | bajó una capa que no es la del camino, o el tramo no está digitalizado ahí. Prueba la 2ª o 3ª capa de la lista de `buscar` |
 | `el camino modelado toca el borde del corredor` | sube `buffer_corredor` en `config.yaml` y vuelve a correr desde `preparar` |
 | `la pieza continua mide X m` | hay muy poco camino continuo para el número de sectores pedido: baja `n_sectores` en `config.yaml` |
 

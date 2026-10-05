@@ -18,8 +18,24 @@ datos:
   # que la llave no acabe en el control de versiones.
   api_key_opentopography: ""
 
-  # URL del servicio ArcGIS de GeoCAM, sin el /query final. Hay que sacarla
-  # del navegador una sola vez: `python -m camino geocam` explica como.
+  # --- GeoCAM: la via PREFERIDA es el WFS ---
+  # GeoCAM publica sus capas bajo el estandar OGC (seccion "Servicios web" de
+  # su pagina: WMS, WFS, KML). El WFS es el que devuelve los vectores, y es
+  # un GeoServer. Ya viene puesto el endpoint global, que es el que responde
+  # cuando el del workspace 'cultura' esta caido.
+  #
+  # OJO: ese servidor esta detras de un proxy que falla a ratos con un 500
+  # ("Error during SSL Handshake with remote server"). No es un error de tu
+  # peticion: el programa reintenta y prueba rutas alternativas.
+  geocam_wfs: "https://geoservicios.cultura.gob.pe/geoserver/wfs"
+
+  # Nombre de la capa dentro de ese WFS. Dejalo vacio y corre
+  # `python -m camino buscar`: lista las capas publicadas y rellena esta
+  # linea con la que mas se parezca al camino.
+  geocam_capa: ""
+
+  # --- alternativa, solo si el WFS no responde ---
+  # Capa de ArcGIS REST, sin el /query final. README, paso 3, opcion C.
   geocam_servicio: ""
 
 costo:

@@ -55,10 +55,18 @@ def preparar_rasteres(cfg):
     banda = preparar.banda_incertidumbre(a, b)
     print(f"  incertidumbre vertical entre fuentes: {banda}")
 
-    print("Mascara del corredor:")
-    camino = gpd.read_file(cfg.dir_datos / "qn_geocam.gpkg", layer="camino")
-    agua_geoms = _agua_geoms(cfg)
-    mascara, _ = preparar.mascara_corredor(cfg, camino, agua_geoms)
+    ruta_camino = cfg.dir_datos / "qn_geocam.gpkg"
+    if ruta_camino.exists():
+        print("Mascara del corredor:")
+        camino = gpd.read_file(ruta_camino, layer="camino")
+        agua_geoms = _agua_geoms(cfg)
+        mascara, _ = preparar.mascara_corredor(cfg, camino, agua_geoms)
+    else:
+        print("Sin camino observado todavia: la mascara es la caja entera.")
+        print("  Puedes seguir con 'superficies', que no lo necesita. Para")
+        print("  'grafo' en adelante si hace falta: `python -m camino ruta`.")
+        mascara = np.isfinite(a)
+
     preparar.escribe(cfg.dir_derivados / "mascara.tif",
                      mascara.astype(np.float32), t, cfg.crs, nodata=0)
     print(f"  {int(mascara.sum())} celdas transitables de {mascara.size} "

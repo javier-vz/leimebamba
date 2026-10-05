@@ -32,7 +32,9 @@ class Config:
 
     # acceso a datos
     api_key: str
-    geocam_servicio: str
+    geocam_wfs: str          # endpoint WFS (la via preferida)
+    geocam_capa: str         # nombre de la capa dentro del WFS, si ya se sabe
+    geocam_servicio: str     # alternativa: capa de ArcGIS REST
 
     # modelo de costo
     g_max: float
@@ -70,6 +72,8 @@ class Config:
             crs=str(d["extension"]["crs"]),
             resolucion=float(d["extension"]["resolucion"]),
             api_key=str(llave),
+            geocam_wfs=str(d["datos"].get("geocam_wfs") or ""),
+            geocam_capa=str(d["datos"].get("geocam_capa") or ""),
             geocam_servicio=str(d["datos"].get("geocam_servicio") or ""),
             g_max=float(d["costo"]["g_max"]),
             epsilon=float(d["costo"]["epsilon"]),
@@ -134,16 +138,32 @@ class Config:
                 "     o pegala en config.yaml, en datos.api_key_opentopography")
         return self.api_key
 
+    def fuente_geocam(self) -> tuple[str, str]:
+        """Por donde bajar el camino: ('wfs', url) o ('rest', url).
+
+        El WFS tiene prioridad: es el estandar OGC que el propio portal
+        publica, no una URL interna sacada del trafico del navegador.
+        """
+        if self.geocam_wfs:
+            return "wfs", self.geocam_wfs.split("?")[0].rstrip("/")
+        if self.geocam_servicio:
+            return "rest", self.geocam_servicio.rstrip("/").removesuffix("/query")
+        raise SystemExit(
+            "Falta la direccion de GeoCAM. Hay dos vias, de mas a menos comoda:\n"
+            "\n"
+            "  A) WFS, la estandar. En https://geocam.cultura.gob.pe/ hay una\n"
+            "     seccion 'Servicios web' con iconos de WMS, WFS y KML. Haz clic\n"
+            "     en el de WFS y copia la direccion que te de (lleva '/wfs' o\n"
+            "     'service=WFS' dentro). Pegala en config.yaml, en la linea\n"
+            "     'geocam_wfs'. Luego corre:  python -m camino buscar\n"
+            "     para que te liste las capas y elija la del camino.\n"
+            "\n"
+            "  B) ArcGIS REST, si el WFS no responde. Esta en el README,\n"
+            "     paso 3, opcion C. Va en la linea 'geocam_servicio'.")
+
     def exige_geocam(self) -> str:
-        if not self.geocam_servicio:
-            raise SystemExit(
-                "Falta la URL del servicio de GeoCAM. Hay que sacarla del\n"
-                "navegador una sola vez:\n"
-                "  1. Abre https://geocam.cultura.gob.pe/\n"
-                "  2. F12 -> pestana Network, escribe 'query' en el filtro\n"
-                "  3. Acerca el mapa a Chachapoyas hasta que carguen las capas\n"
-                "  4. Clic derecho en una peticion -> Copy -> Copy URL\n"
-                "  5. Quitale todo desde '/query' en adelante: te queda algo\n"
-                "     como .../FeatureServer/0\n"
-                "  6. Pegalo en config.yaml, en datos.geocam_servicio")
-        return self.geocam_servicio.rstrip("/").removesuffix("/query")
+        """La URL de ArcGIS REST, para el camino alternativo."""
+        clase, url = self.fuente_geocam()
+        if clase != "rest":
+            raise SystemExit("esta configurado el WFS, no el servicio REST")
+        return url

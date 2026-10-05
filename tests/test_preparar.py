@@ -201,7 +201,7 @@ def test_config_pide_la_llave_con_instrucciones(cfg, monkeypatch):
 
 
 def test_config_limpia_el_sufijo_query_del_servicio(cfg):
-    con = type(cfg)(**{**cfg.__dict__,
+    con = type(cfg)(**{**cfg.__dict__, "geocam_wfs": "",
                        "geocam_servicio": "https://x/FeatureServer/0/query"})
     assert con.exige_geocam() == "https://x/FeatureServer/0"
 

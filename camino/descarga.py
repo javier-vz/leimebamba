@@ -147,7 +147,7 @@ def agua(cfg, forzar: bool = False) -> pathlib.Path:
 
 
 def camino_registrado(cfg, forzar: bool = False) -> pathlib.Path:
-    """Trae el camino de GeoCAM, pagina por pagina, a un GeoPackage.
+    """Trae el camino de GeoCAM a un GeoPackage, por WFS o por ArcGIS REST.
 
     Al final imprime el numero que decide el diseno del estudio: cuantos
     metros de polilinea CONTINUA hay. Si el tramo continuo mas largo es
@@ -155,14 +155,78 @@ def camino_registrado(cfg, forzar: bool = False) -> pathlib.Path:
     hay que elegir una de las dos.
     """
     import geopandas as gpd
-    import pandas as pd
 
     destino = cfg.dir_datos / "qn_geocam.gpkg"
     if destino.exists() and not forzar:
         print(f"  ya esta: {destino.name}")
         return destino
 
-    servicio = cfg.exige_geocam()
+    clase, url = cfg.fuente_geocam()
+    qn = _por_wfs(cfg, url) if clase == "wfs" else _por_rest(cfg, url)
+
+    qn = recorta(qn, cfg)
+    if qn.empty:
+        raise SystemExit(
+            "La capa se bajo bien, pero no tiene nada dentro de la caja del\n"
+            "tramo. O es otra capa, o el tramo no esta digitalizado ahi.")
+
+    qn.to_file(destino, layer="camino", driver="GPKG")
+    resumen(qn)
+    return destino
+
+
+def recorta(qn, cfg):
+    """Deja solo lo que cae dentro de la caja del tramo."""
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    caja = gpd.GeoSeries([box(*cfg.bbox)], crs="EPSG:4326").to_crs(qn.crs)[0]
+    return qn[qn.geometry.intersects(caja)].copy()
+
+
+def _por_wfs(cfg, base: str):
+    """Baja la capa por WFS, el estandar OGC que publica el propio portal."""
+    from . import buscar, wfs
+
+    sesion = requests.Session()
+    print(f"  WFS: {base}")
+    version, xml = wfs.capabilities(base, sesion)
+    if not version:
+        raise SystemExit(
+            f"El WFS de {base} no respondio.\n"
+            "El proxy del Ministerio devuelve 500 de forma intermitente\n"
+            "('Error during SSL Handshake with remote server'): no es un error\n"
+            "de tu peticion. Reintenta en un rato, o corre\n"
+            "  python -m camino buscar\n"
+            "que prueba varias rutas del servidor.")
+
+    capas = wfs.lee_capabilities(xml)
+    capa = cfg.geocam_capa
+    if not capa:
+        puntuadas = sorted(
+            capas,
+            key=lambda c: -buscar.puntua(f"{c['nombre']} {c['titulo']}"))
+        if not puntuadas or buscar.puntua(
+                f"{puntuadas[0]['nombre']} {puntuadas[0]['titulo']}") <= 0:
+            raise SystemExit(
+                f"El WFS publica {len(capas)} capas pero ninguna parece ser el\n"
+                "camino. Corre `python -m camino buscar` para ver la lista y\n"
+                "pon la que reconozcas en config.yaml, en 'geocam_capa'.")
+        capa = puntuadas[0]["nombre"]
+        print(f"  capa elegida automaticamente: {capa}")
+    else:
+        print(f"  capa: {capa}")
+
+    formato = wfs.formato_json(wfs.formatos_salida(xml))
+    print(f"  WFS {version}, formato {formato or 'GML (por defecto)'}")
+    return wfs.descarga_capa(base, capa, version, formato, cfg.crs, sesion)
+
+
+def _por_rest(cfg, servicio: str):
+    """Alternativa: la capa de ArcGIS REST, pagina por pagina."""
+    import geopandas as gpd
+    import pandas as pd
+
     trozos, offset = [], 0
     while True:
         r = requests.get(f"{servicio}/query",
@@ -183,11 +247,8 @@ def camino_registrado(cfg, forzar: bool = False) -> pathlib.Path:
     if not trozos:
         raise SystemExit("GeoCAM no devolvio ningun rasgo en esa caja")
 
-    qn = gpd.GeoDataFrame(pd.concat(trozos, ignore_index=True),
-                          crs="EPSG:4326").to_crs(cfg.crs)
-    qn.to_file(destino, layer="camino", driver="GPKG")
-    resumen(qn)
-    return destino
+    return gpd.GeoDataFrame(pd.concat(trozos, ignore_index=True),
+                            crs="EPSG:4326").to_crs(cfg.crs)
 
 
 def resumen(qn) -> dict:
