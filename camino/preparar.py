@@ -91,13 +91,23 @@ def banda_incertidumbre(a, b) -> dict:
 # -------------------------------------------------------------- corredor
 
 def lineas_unidas(camino):
-    """Une las polilineas del camino registrado en el menor numero de piezas."""
-    from shapely.ops import linemerge
+    """Une las polilineas del camino registrado en el menor numero de piezas.
+
+    Pasa por `unary_union` antes de coser. El registro llega como
+    MultiLineString por rasgo, y `linemerge` sobre esa lista no junta los
+    segmentos que se tocan entre rasgos distintos: sin este paso, el camino
+    disponible se subestima -- en el tramo Chillo-Chachapoyas, 7.96 km en
+    vez de los 12.40 km reales.
+    """
+    from shapely.ops import linemerge, unary_union
+
     geoms = [g for g in camino.geometry
-             if g is not None and g.geom_type in ("LineString", "MultiLineString")]
+             if g is not None and not g.is_empty
+             and g.geom_type in ("LineString", "MultiLineString")]
     if not geoms:
         raise ValueError("el camino registrado no tiene ninguna polilinea")
-    unido = linemerge(geoms)
+    u = unary_union(geoms)
+    unido = linemerge(u) if u.geom_type != "LineString" else u
     piezas = list(unido.geoms) if unido.geom_type == "MultiLineString" else [unido]
     return sorted(piezas, key=lambda g: g.length, reverse=True)
 

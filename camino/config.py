@@ -35,6 +35,9 @@ class Config:
     geocam_wfs: str          # endpoint WFS (la via preferida)
     geocam_capa: str         # nombre de la capa dentro del WFS, si ya se sabe
     geocam_servicio: str     # alternativa: capa de ArcGIS REST
+    solo_observadas: bool    # excluir las capas de "Proyeccion..."
+    capas_camino: tuple      # capas concretas, si se quieren fijar
+    tramo: str               # tramo del registro a estudiar
 
     # modelo de costo
     g_max: float
@@ -75,6 +78,9 @@ class Config:
             geocam_wfs=str(d["datos"].get("geocam_wfs") or ""),
             geocam_capa=str(d["datos"].get("geocam_capa") or ""),
             geocam_servicio=str(d["datos"].get("geocam_servicio") or ""),
+            solo_observadas=bool(d["datos"].get("solo_observadas", True)),
+            capas_camino=tuple(d["datos"].get("capas_camino") or ()),
+            tramo=str(d["datos"].get("tramo") or ""),
             g_max=float(d["costo"]["g_max"]),
             epsilon=float(d["costo"]["epsilon"]),
             percentiles=tuple(float(v) for v in d["costo"]["percentiles"]),

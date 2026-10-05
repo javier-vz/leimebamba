@@ -34,6 +34,24 @@ datos:
   # linea con la que mas se parezca al camino.
   geocam_capa: ""
 
+  # --- que parte del registro cuenta como camino OBSERVADO ---
+  # El registro clasifica cada segmento. Las capas de "Proyeccion de Camino
+  # por Reemplazo / Danos / Ausencia" son tramos donde el camino YA NO ESTA
+  # y la linea la dibujo alguien infiriendo por donde iba. Ajustar el modelo
+  # contra una linea proyectada es circular: recuperas los supuestos de quien
+  # la proyecto, no el comportamiento de quien construyo el camino.
+  solo_observadas: true
+
+  # Capas concretas, si quieres fijarlas a mano. Vacio = las cuatro
+  # observadas (Trazo de Camino, Camino Registrado, Camino Identificado,
+  # Camino Afectado).
+  capas_camino: []
+
+  # Tramo del registro a estudiar. Vacio = todos los que caigan en la caja.
+  # En la caja de Leimebamba-Chachapoyas, el que corresponde es
+  # "Chillo - Chachapoyas": 23.0 km registrados, 12.4 km continuos.
+  tramo: "Chillo - Chachapoyas"
+
   # --- alternativa, solo si el WFS no responde ---
   # Capa de ArcGIS REST, sin el /query final. README, paso 3, opcion C.
   geocam_servicio: ""
@@ -78,10 +96,20 @@ barrido:
   # vectores y K=4 da 1771.
   n_simplex: 20
 
-  # Sectores en que se parte el camino registrado. OJO: con poco camino
-  # continuo, sectores y validacion bloqueada compiten por los mismos
-  # metros. Hay que elegir una de las dos ANTES de correr nada.
-  n_sectores: 6
+  # Sectores en que se parte el camino registrado.
+  #
+  # Medido sobre el registro (KMZ de GEO GPS PERU, tramo Chillo-Chachapoyas):
+  # 23.02 km repartidos en 3 piezas, la mayor de 12.40 km. Con 4 sectores
+  # salen 3.10 km cada uno, unas 103 celdas de 30 m: suficiente para que el
+  # camino de minimo costo tenga margen de maniobra dentro del sector.
+  #
+  # Con 6 sectores bajarian a 2.07 km (69 celdas), que empieza a ser poco:
+  # en un sector corto casi cualquier juego de pesos da el mismo camino y el
+  # conjunto casi-optimo se hincha sin que signifique nada.
+  #
+  # Con 4 sectores ademas cabe la validacion bloqueada: ajustar en los pares
+  # y medir en los impares.
+  n_sectores: 4
 
   # Superficies nulas por sector. El piso del valor p es 1/(M+1): con 500
   # no se puede reportar p < 0.002, se reporta p = 0.002 con M = 500.

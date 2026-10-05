@@ -183,12 +183,22 @@ def camino_registrado(cfg, forzar: bool = False) -> pathlib.Path:
 
 
 def recorta(qn, cfg):
-    """Deja solo lo que cae dentro de la caja del tramo."""
+    """Corta la geometria por la caja del tramo.
+
+    Se CORTA, no se seleccionan los rasgos que la tocan: el DEM solo cubre
+    la caja, asi que un trozo de camino fuera de ella no se puede modelar, y
+    dejarlo dentro inflaria los kilometros y podria poner el extremo de un
+    sector fuera del raster.
+    """
     import geopandas as gpd
     from shapely.geometry import box
 
     caja = gpd.GeoSeries([box(*cfg.bbox)], crs="EPSG:4326").to_crs(qn.crs)[0]
-    return qn[qn.geometry.intersects(caja)].copy()
+    dentro = qn[qn.geometry.intersects(caja)]
+    if dentro.empty:
+        return dentro.copy()
+    cortado = gpd.clip(dentro, caja)
+    return cortado[~cortado.geometry.is_empty].copy()
 
 
 def _por_wfs(cfg, base: str):
@@ -203,9 +213,22 @@ def _por_wfs(cfg, base: str):
             f"El WFS de {base} no respondio.\n"
             "El proxy del Ministerio devuelve 500 de forma intermitente\n"
             "('Error during SSL Handshake with remote server'): no es un error\n"
-            "de tu peticion. Reintenta en un rato, o corre\n"
-            "  python -m camino buscar\n"
-            "que prueba varias rutas del servidor.")
+            "de tu peticion y no hay nada que puedas arreglar de tu lado.\n"
+            "\n"
+            "QUE HACER AHORA. El camino puede entrar por otras dos puertas:\n"
+            "\n"
+            "  1) Seguir hoy mismo con OpenStreetMap, como apano provisional:\n"
+            "       python -m camino ruta --fuente osm\n"
+            "     Sirve para correr todo de punta a punta y ver si el modelo\n"
+            "     hace algo sensato. NO vale para publicar.\n"
+            "\n"
+            "  2) Un archivo tuyo (lo que corresponde mientras GeoCAM no vuelva):\n"
+            "       python -m camino ruta --fuente archivo --archivo datos/X.shp\n"
+            "     Vale .shp, .kml, .gpkg, .geojson o el .gpx del Garmin.\n"
+            "     Hay un Qhapaq Nan nacional en shapefile aqui:\n"
+            "     https://www.geogpsperu.com/2020/10/mapa-del-qhapaq-nan-camino-inca.html\n"
+            "\n"
+            "  3) Reintentar GeoCAM mas tarde:  python -m camino buscar")
 
     capas = wfs.lee_capabilities(xml)
     capa = cfg.geocam_capa
@@ -258,15 +281,35 @@ def _por_rest(cfg, servicio: str):
                             crs="EPSG:4326").to_crs(cfg.crs)
 
 
+def continuo_mayor(qn) -> tuple[float, int]:
+    """Longitud de la pieza continua mas larga, en metros, y cuantas piezas.
+
+    Cose primero lo que se toca. Medir el rasgo mas largo por separado
+    subestima el camino disponible: el registro llega partido en segmentos
+    que son contiguos sobre el terreno, y para el modelo cuentan como uno.
+    """
+    from shapely.ops import linemerge, unary_union
+
+    geoms = [g for g in qn.geometry if g is not None and not g.is_empty]
+    if not geoms:
+        return 0.0, 0
+    u = unary_union(geoms)
+    m = linemerge(u) if u.geom_type != "LineString" else u
+    piezas = list(m.geoms) if m.geom_type == "MultiLineString" else [m]
+    return float(max(p.length for p in piezas)), len(piezas)
+
+
 def resumen(qn) -> dict:
     """El diagnostico que hay que mirar antes de modelar nada."""
     lineas = qn[qn.geometry.geom_type.isin(["LineString", "MultiLineString"])]
     largos = lineas.geometry.length
+    mayor, piezas = continuo_mayor(lineas)
     info = {
         "rasgos": int(len(qn)),
         "lineas": int(len(lineas)),
         "largo_total_km": round(float(largos.sum()) / 1000, 2) if len(lineas) else 0.0,
-        "continuo_max_km": round(float(largos.max()) / 1000, 2) if len(lineas) else 0.0,
+        "piezas_continuas": piezas,
+        "continuo_max_km": round(mayor / 1000, 2),
         "tipos": qn.geometry.geom_type.value_counts().to_dict(),
         "campos": [c for c in qn.columns if c != "geometry"],
     }

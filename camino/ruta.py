@@ -36,9 +36,16 @@ def desde_archivo(cfg, ruta):
     import geopandas as gpd
     import pandas as pd
 
+    from . import registro
+
     ruta = pathlib.Path(ruta)
     if not ruta.exists():
         raise SystemExit(f"No encuentro el archivo: {ruta}")
+
+    if ruta.suffix.lower() in (".kmz", ".kml"):
+        return registro.lee(ruta, cfg.crs,
+                            solo_observadas=cfg.solo_observadas,
+                            capas_pedidas=cfg.capas_camino or None)
 
     if ruta.suffix.lower() == ".gpx":
         trozos = []
@@ -88,6 +95,40 @@ def desde_osm(cfg, sesion=None):
     return g
 
 
+def filtra_tramo(cfg, qn):
+    """Se queda con el tramo del registro que pide config.yaml.
+
+    Antes de filtrar imprime el inventario completo, porque la decision de
+    que tramo estudiar se toma mirando cuanto camino CONTINUO tiene cada
+    uno, no cuantos kilometros suma.
+    """
+    from . import registro
+
+    if "tramnomb" not in qn.columns:
+        return qn                      # la fuente no trae tramos (GPX, OSM)
+
+    inventario = registro.tramos(qn)
+    if inventario:
+        print("\n  --- tramos del registro dentro de la caja ---")
+        print(f"  {'tramo':34s} {'rasgos':>6s} {'km':>8s} {'continuo':>9s}")
+        for nombre, n, km, mayor in inventario:
+            marca = " <--" if cfg.tramo and nombre == cfg.tramo else ""
+            print(f"  {nombre[:34]:34s} {n:6d} {km:8.2f} {mayor:9.2f}{marca}")
+
+    if not cfg.tramo:
+        return qn
+
+    sel = qn[qn["tramnomb"] == cfg.tramo]
+    if sel.empty:
+        nombres = sorted({str(x) for x in qn["tramnomb"].dropna()})
+        raise SystemExit(
+            f"\nEl tramo '{cfg.tramo}' no aparece en la caja.\n"
+            f"Los que hay: {nombres}\n"
+            "Cambia 'tramo' en config.yaml, o dejalo vacio para usarlos todos.")
+    print(f"\n  Filtrado al tramo '{cfg.tramo}': {len(sel)} rasgos")
+    return sel.copy()
+
+
 def importar(cfg, fuente: str = "geocam", archivo=None, forzar: bool = False):
     """Deja el camino observado en datos/qn_geocam.gpkg, venga de donde venga."""
     from . import descarga
@@ -115,6 +156,7 @@ def importar(cfg, fuente: str = "geocam", archivo=None, forzar: bool = False):
     if qn.empty:
         raise SystemExit("no quedo nada dentro de la caja del tramo")
 
+    qn = filtra_tramo(cfg, qn)
     qn.to_file(destino, layer="camino", driver="GPKG")
     descarga.resumen(qn)
 

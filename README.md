@@ -67,7 +67,7 @@ Tarda unos minutos la primera vez. Comprueba que quedó bien:
 python -m pytest -q
 ```
 
-Tienen que pasar **194 pruebas** en dos o tres segundos. Si falla algo aquí,
+Tienen que pasar **214 pruebas** en dos o tres segundos. Si falla algo aquí,
 falla antes de tocar datos, que es cuando conviene.
 
 > **Cada vez que abras la consola de nuevo**, dos cosas: `conda activate
@@ -187,20 +187,46 @@ navegador, así que no es nada que puedas arreglar de tu lado. El programa
 prueba cuatro rutas del servidor y reintenta; si aun así no responde, está
 caído y hay que usar una de las otras dos fuentes mientras tanto.
 
-### Un archivo tuyo
+### Un archivo tuyo — el KMZ del registro
 
-La salida práctica. Vale un shapefile, un KML, un GeoPackage, un GeoJSON o un
-GPX; el programa lo reproyecta y lo recorta solo.
+La salida práctica mientras GeoCAM no vuelva, y la que está en uso.
 
-- **[GEO GPS PERÚ](https://www.geogpsperu.com/2020/10/mapa-del-qhapaq-nan-camino-inca.html)**
-  publica el Qhapaq Ñan nacional en shapefile y KMZ, descarga directa.
-  Esa página no dice de qué año es la capa ni de qué versión del registro
-  salió, así que sirve para trabajar ya, pero antes de publicar un número hay
-  que contrastarlo con GeoCAM.
-- **Los tracks de Dina**, cuando vuelva del campo. El `.gpx` del Garmin entra
-  directo, sin convertir nada.
-- **Digitalizarlo tú** en QGIS sobre una imagen satelital, y guardarlo como
-  GeoPackage.
+[GEO GPS PERÚ](https://www.geogpsperu.com/2020/10/mapa-del-qhapaq-nan-camino-inca.html)
+publica el Qhapaq Ñan nacional en KMZ y shapefile, descarga directa. El KMZ
+no es una traza suelta: trae **las categorías con que el Ministerio clasifica
+cada segmento**, cada una en su propia capa. Ponlo en `datos/` y:
+
+```bash
+python -m camino ruta --fuente archivo --archivo datos/qhapaq_nan.kmz
+```
+
+El programa lo abre, saca los atributos (que vienen escondidos en una tabla
+HTML dentro de cada placemark), imprime el inventario de tramos y se queda
+con el que pide `config.yaml`.
+
+**Excluye las capas de «Proyección de Camino»** por Reemplazo, Daños o
+Ausencia. Son tramos donde el camino ya no está y la línea la dibujó alguien
+infiriendo por dónde iba; ajustar el modelo contra ellas es circular. Está
+explicado en `METODO.md`, §8 bis, y se controla con `datos.solo_observadas`.
+
+Lo que hay en la caja del estudio, medido sobre ese KMZ:
+
+| Tramo | rasgos | km | continuo |
+|---|---|---|---|
+| Leymebamba – Chilchos – Mendoza | 2 | 29.29 | 29.29 |
+| La Jalca – Mendoza | 5 | 20.25 | 20.25 |
+| Chachapoyas – Jumbilla | 9 | 16.97 | 14.28 |
+| Pauja – Santa Cruz | 3 | 14.21 | 14.21 |
+| **Chillo – Chachapoyas** | **11** | **23.02** | **12.40** |
+| Chachapoyas – Cochamal | 13 | 28.71 | 8.55 |
+| Pueblo Viejo – La Jalca Grande | 6 | 13.57 | 7.90 |
+
+**Chillo – Chachapoyas** es el tramo del proyecto, y es el que viene puesto
+en `config.yaml`. Para estudiar otro, cambia `datos.tramo`; para usarlos
+todos, déjalo vacío.
+
+También entran por aquí un shapefile, un GeoPackage, un GeoJSON, o el `.gpx`
+del Garmin de Dina cuando vuelva del campo.
 
 ### OpenStreetMap, sólo como apaño
 
@@ -225,6 +251,13 @@ continua* trajo. Es el número que decide el diseño del estudio:
   los resultados.
 
 Si el tramo continuo más largo baja de unos 15 km, el programa lo avisa.
+
+Para Chillo – Chachapoyas ya está medido: **23.02 km registrados en 3 piezas,
+la mayor de 12.40 km**. Con eso, `n_sectores: 4` da 3.10 km por sector (unas
+103 celdas de 30 m), que deja margen al camino de mínimo costo dentro de cada
+sector y además permite validación bloqueada —ajustar en los pares, medir en
+los impares—. Con 6 sectores bajarían a 2.07 km y empezarían a ser demasiado
+cortos para que los pesos signifiquen algo.
 
 **Al terminar el paso 8**, `resultados/optimos_por_sector.json` trae una fila
 por sector: los pesos óptimos, la distancia al camino observado, el valor *p*

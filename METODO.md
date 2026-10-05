@@ -316,6 +316,37 @@ reporta «$p = 0.002$ con $M = 500$».
 
 Código: `camino/nulos.py`.
 
+## 8 bis. Qué cuenta como camino observado
+
+El registro del Qhapaq Ñan no es una traza: clasifica cada segmento, y la
+clase decide si ese segmento puede usarse para ajustar el modelo.
+
+| Categoría | Qué es | ¿Sirve para ajustar? |
+|---|---|---|
+| Trazo de Camino | camino físico | sí |
+| Camino Registrado | observado y formalmente registrado | sí |
+| Camino Identificado | observado, identificado en campo | sí |
+| Camino Afectado | observado, con daños | sí |
+| Proyección por Reemplazo | lo tapó una carretera | **no** |
+| Proyección por Daños | el tramo se destruyó | **no** |
+| Proyección por Ausencia | no se encontró en campo | **no** |
+
+Las tres de «Proyección» son tramos donde **el camino ya no está** y la línea
+la dibujó alguien infiriendo por dónde iba. Ajustar un modelo de costo contra
+una línea proyectada es circular: lo que se recupera son los supuestos de
+quien la proyectó —que probablemente fueron, precisamente, que el camino
+seguía la ruta más llevadera— y no el comportamiento de quien lo construyó.
+El resultado saldría bien y no significaría nada.
+
+El paquete excluye las tres por omisión (`datos.solo_observadas` en
+`config.yaml`). En el tramo Chillo–Chachapoyas excluirlas no cuesta nada:
+las proyecciones no alargan ni un metro la pieza continua mayor.
+
+Si en algún momento interesa usarlas, es para otra pregunta: contrastar por
+dónde pasa el camino de mínimo costo contra por dónde se proyectó el tramo
+perdido. Eso es una validación del registro, no un ajuste del modelo, y los
+pesos tienen que venir ya fijados desde los sectores observados.
+
 ## 9. Lo que este diseño no hace
 
 - **No datea el camino.** Los pesos describen la relación entre una geometría y
