@@ -4,158 +4,343 @@ Optimización inversa de pesos de terreno. La pregunta no es por dónde pasó el
 camino —eso ya está registrado— sino **qué variables del terreno explican por
 dónde pasó, y si son las mismas a lo largo de todo el tramo**.
 
-El método y las ecuaciones están en [`METODO.md`](METODO.md). Esto es cómo
-correrlo.
+Las ecuaciones y el porqué de cada decisión están en [`METODO.md`](METODO.md).
+Este archivo es sólo cómo correrlo.
 
 ---
 
-## 1. El entorno, una sola vez
+## Antes de empezar: cómo está organizado
 
-Todo se hace en la **consola de Anaconda** (Anaconda Prompt). No hace falta
-tocar QGIS, ArcGIS, GRASS, ni la línea de comandos de GDAL en ningún momento:
-el paquete hace la reproyección, el recorte, la hidrología y el grafo en
-Python.
+Descomprime el zip donde guardes tus proyectos. Da igual la ruta exacta, pero
+que no tenga espacios ni tildes. Por ejemplo:
+
+- Windows: `C:\proyectos\camino_leimebamba`
+- Linux o Mac: `~/proyectos/camino_leimebamba`
+
+Dentro queda esto:
+
+```
+camino_leimebamba/
+│
+├── config.yaml          ← el ÚNICO archivo que vas a editar
+├── environment.yml         receta del entorno de conda
+├── README.md               este archivo
+├── METODO.md               las ecuaciones
+│
+├── camino/                 el programa (no hace falta abrirlo)
+│   ├── descarga.py
+│   ├── preparar.py
+│   ├── superficies.py
+│   ├── hidrologia.py
+│   ├── costo.py
+│   ├── grafo.py
+│   ├── barrido.py
+│   ├── metricas.py
+│   ├── nulos.py
+│   ├── equifinalidad.py
+│   ├── pipeline.py
+│   ├── config.py
+│   └── cli.py
+│
+├── tests/                  las pruebas
+│
+├── datos/               ← aquí caen las descargas, solas
+│   └── gpx/             ← aquí van los .gpx del Garmin, cuando lleguen
+│
+├── derivados/           ← aquí caen los rásteres calculados, solos
+│
+└── resultados/          ← aquí caen las tablas y las figuras, solas
+```
+
+Las tres carpetas de abajo (`datos`, `derivados`, `resultados`) empiezan
+vacías y **el programa las llena solo**. Tú no bajas ni mueves ningún archivo a
+mano, con una sola excepción: los `.gpx` del Garmin, que van a `datos/gpx/`
+cuando Dina vuelva del campo.
+
+---
+
+## Paso 1 — Instalar el entorno
+
+Abre la **consola de Anaconda** (en Windows se llama *Anaconda Prompt*; búscala
+en el menú de inicio). Métete en la carpeta del proyecto y crea el entorno:
 
 ```bash
+cd C:\proyectos\camino_leimebamba
 conda env create -f environment.yml
 conda activate camino
 ```
 
-Si prefieres armarlo a mano:
+Eso instala numpy, scipy, rasterio, geopandas y lo demás. Tarda unos minutos la
+primera vez y no hay que repetirlo nunca más.
 
-```bash
-conda create -n camino -c conda-forge python=3.12 numpy scipy pandas rasterio geopandas shapely pyyaml joblib matplotlib requests pytest -y
-conda activate camino
-```
-
-Comprueba que quedó, desde la carpeta del proyecto:
+Comprueba que quedó bien:
 
 ```bash
 python -m pytest -q
 ```
 
-Deben pasar 123 pruebas en un par de segundos. Si falla algo aquí, falla antes
-de tocar datos, que es cuando conviene.
+Tienen que pasar 123 pruebas en dos o tres segundos. Si algo falla aquí, falla
+antes de tocar datos, que es cuando conviene que falle.
 
-> Cada vez que abras la consola de nuevo: `conda activate camino` y `cd` a la
-> carpeta del proyecto. Si Python no encuentra un paquete, el 95% de las veces
-> es que olvidaste activar el entorno.
+> **Cada vez que abras la consola de nuevo** hay que repetir dos cosas:
+> `conda activate camino` y `cd` a la carpeta del proyecto. Si Python dice que
+> no encuentra un paquete, casi siempre es que falta el `conda activate`.
 
-## 2. Las dos llaves que hay que conseguir
+No hace falta QGIS, ni ArcGIS, ni GRASS, ni escribir comandos de GDAL. El
+programa hace la reproyección, el recorte, la hidrología y el grafo en Python.
+QGIS sólo sirve al final, para mirar los resultados en un mapa.
 
-**(a) La llave de OpenTopography**, gratis e inmediata, para bajar los DEM.
-En <https://portal.opentopography.org/> → *My Account* → pide una API key.
-Después, en la consola:
+---
 
-```bash
-set OPENTOPOGRAPHY_API_KEY=tu_llave          REM Windows
-export OPENTOPOGRAPHY_API_KEY=tu_llave       # Linux / macOS
-```
+## Paso 2 — Conseguir la llave de OpenTopography
 
-Va en la variable de entorno y no en `config.yaml` para que no acabe en el
-control de versiones.
+Es gratis e inmediata, y sirve para que el programa pueda bajar los dos modelos
+de elevación.
 
-**(b) La URL del servicio de GeoCAM**, que el portal no publica y hay que
-sacar del navegador una sola vez:
+1. Entra a <https://portal.opentopography.org/>
+2. Créate una cuenta (o entra si ya tienes).
+3. Ve a **My Account** y pide una *API key*. Te la dan en el momento: es una
+   cadena larga de letras y números.
 
-1. Abre <https://geocam.cultura.gob.pe/>
-2. `F12` → pestaña **Network**, escribe `query` en el filtro
-3. Acerca el mapa a Chachapoyas hasta que carguen las capas del camino
-4. Clic derecho sobre una de las peticiones → *Copy* → *Copy URL*
-5. Quítale todo desde `/query` en adelante. Te queda algo como
-   `https://.../FeatureServer/0`
-6. Pégalo en `config.yaml`, en `datos.geocam_servicio`
-
-Si te pierdes, `python -m camino geocam` sin configurarlo imprime estos
-mismos pasos.
-
-## 3. Correr el estudio
-
-Un paso por comando, en este orden:
+Ahora dísela a la consola. Escribe esto en la **misma ventana** donde vas a
+trabajar, cambiando `pega_aqui_tu_llave` por la tuya:
 
 ```bash
-python -m camino bajar          # los dos DEM y los cuerpos de agua
-python -m camino geocam         # el camino registrado
-python -m camino preparar       # alinear rásteres + máscara del corredor
-python -m camino superficies    # pendiente, rugosidad, drenaje, humedad
-python -m camino grafo          # el grafo dirigido y la matriz Phi
-python -m camino revisar        # UN camino, para mirarlo  <-- no te lo saltes
-python -m camino nulos          # el nulo por sector
-python -m camino barrido        # el barrido de pesos
-python -m camino resultados     # el perfil de equifinalidad
+set OPENTOPOGRAPHY_API_KEY=pega_aqui_tu_llave
 ```
 
-o `python -m camino todo` de corrido.
+En Linux o Mac es `export` en lugar de `set`:
 
-**El orden no es decorativo.** `nulos` va antes de `barrido` porque un sector
-cuyo mejor camino no le gana a terreno aleatorio no tiene pesos que reportar,
-y compararle los pesos a otro sector sería comparar dos números vacíos.
+```bash
+export OPENTOPOGRAPHY_API_KEY=pega_aqui_tu_llave
+```
 
-**`revisar` es el paso que no se salta.** Corre un solo Dijkstra con todo el
-peso en la pendiente y escribe `resultados/revision_pendiente.gpkg`. Ábrelo en
-QGIS encima del DEM y míralo. Si ese camino no es plausible sobre el terreno,
-nada de lo que viene después lo es, y no hay estadística que lo arregle.
+Ojo: eso dura sólo mientras la ventana esté abierta. Si cierras la consola, hay
+que volver a escribirlo. Se hace así, y no se guarda en un archivo, para que la
+llave no acabe subida al repositorio sin querer.
 
-## 4. Lo primero que hay que mirar
+---
 
-`python -m camino geocam` imprime, al final, **cuántos metros de polilínea
-continua** hay en el registro. Es el número que decide el diseño del estudio:
+## Paso 3 — Conseguir la dirección del servicio de GeoCAM
 
-- Con bastante camino continuo: se puede partir en sectores **y** validar en
-  bloques (ajustar en los sectores pares, medir en los impares).
-- Con poco: las dos cosas compiten por los mismos metros. Hay que **elegir una
-  antes de correr el barrido**, no después de ver los resultados.
+GeoCAM, el visor del Ministerio de Cultura, funciona sobre un servidor ArcGIS.
+Ese servidor tiene una dirección que se puede consultar desde un programa, pero
+la página no la muestra en ningún sitio. Hay que sacarla del navegador. Se hace
+una sola vez y queda guardada.
 
-Si el tramo continuo más largo baja de ~15 km, el programa avisa.
+1. Abre <https://geocam.cultura.gob.pe/> en Chrome o Firefox.
+2. Pulsa `F12`. Se abre un panel de herramientas de desarrollo.
+3. En ese panel, entra a la pestaña **Network** (o **Red**).
+4. En la casilla de filtro escribe `query`.
+5. Vuelve al mapa y acércate a Chachapoyas, hasta que se dibujen las capas del
+   camino. Verás que en el panel van apareciendo líneas nuevas.
+6. Haz clic derecho sobre una de esas líneas → **Copy** → **Copy URL**.
+7. Pégala en un bloc de notas. Será algo larguísimo, parecido a esto:
 
-## 5. Qué hay en cada carpeta
+   ```
+   https://geocam.cultura.gob.pe/server/rest/services/QhapaqNan/MapServer/2/query?f=json&where=1%3D1&outFields=*...
+   ```
 
-| Carpeta | Qué guarda |
-|---|---|
-| `datos/` | lo que se bajó, tal como vino. No se edita nunca. |
-| `derivados/` | rásteres alineados, componentes de costo, el grafo, los nulos. Todo reproducible: se puede borrar. |
-| `resultados/` | las tablas, el perfil de equifinalidad y su figura. |
-| `camino/` | el paquete. |
-| `tests/` | las pruebas. |
+8. **Recorta todo desde `/query` en adelante**, incluido el `/query`. Te tiene
+   que quedar sólo esto:
 
-## 6. Los parámetros
+   ```
+   https://geocam.cultura.gob.pe/server/rest/services/QhapaqNan/MapServer/2
+   ```
 
-Todos viven en [`config.yaml`](config.yaml), comentados uno por uno. Si un
-umbral aparece escrito dentro del código, es un bug.
+Eso es lo que hay que guardar.
 
-Los tres que vas a querer tocar:
+### Dónde se guarda
 
-- `costo.componentes` — empieza con tres (231 vectores de peso, ~30 min).
-  Agregar `humedad` lo lleva a cuatro (1771 vectores, ~2 h).
-- `dominio.buffer_corredor` — si `revisar` avisa que el camino toca el borde,
-  ensánchalo.
-- `dominio.umbral_quebrada` — es el único parámetro del modelo que el trabajo
-  de campo fija directamente: se calibra contra las quebradas que realmente
-  haya que cruzar.
+Abre `config.yaml` con cualquier editor de texto (el Bloc de notas sirve).
+Busca estas líneas, que están cerca del principio:
 
-## 7. Los tracks del GPS
+```yaml
+datos:
+  api_key_opentopography: ""
 
-Todavía no están: Dina camina del 8 al 15 de octubre. **Nada se bloquea por
-eso.** Los tracks entran en la validación; hasta que lleguen, el modelo se
-ajusta contra la geometría de GeoCAM sola.
+  geocam_servicio: ""
+```
 
-Cuando lleguen, los `.gpx` salen del Garmin por USB (carpeta
-`Garmin/Activities`) o exportándolos de Garmin Connect. Van a `datos/gpx/`.
+Y pon tu dirección entre las comillas de `geocam_servicio`, así:
 
-## 8. Datos sensibles
+```yaml
+datos:
+  api_key_opentopography: ""
+
+  geocam_servicio: "https://geocam.cultura.gob.pe/server/rest/services/QhapaqNan/MapServer/2"
+```
+
+`api_key_opentopography` se queda vacío: esa va en la consola, como viste en el
+paso 2.
+
+Guarda el archivo y listo. Si te pierdes en algún punto, corre
+`python -m camino geocam` sin haber configurado nada: el programa imprime estos
+mismos pasos en la pantalla.
+
+---
+
+## Paso 4 — Correr el estudio
+
+Nueve comandos, en este orden. Cada uno deja su resultado en disco, así que
+puedes parar y seguir otro día sin perder nada.
+
+```bash
+python -m camino bajar
+python -m camino geocam
+python -m camino preparar
+python -m camino superficies
+python -m camino grafo
+python -m camino revisar
+python -m camino nulos
+python -m camino barrido
+python -m camino resultados
+```
+
+O todos de corrido con `python -m camino todo`.
+
+### Qué hace cada uno y qué archivo deja
+
+| Comando | Qué hace | Qué escribe |
+|---|---|---|
+| `bajar` | baja los dos modelos de elevación y los cuerpos de agua | `datos/cop30_raw.tif`, `datos/aw3d30_raw.tif`, `datos/agua_osm.json` |
+| `geocam` | trae el camino registrado del servidor del Ministerio | `datos/qn_geocam.gpkg` |
+| `preparar` | pone los dos modelos en la misma rejilla y recorta el corredor | `derivados/cop30.tif`, `derivados/aw3d30.tif`, `derivados/mascara.tif` |
+| `superficies` | calcula pendiente, rugosidad, drenaje y humedad | `derivados/phi_rugosidad.tif`, `derivados/phi_drenaje.tif`, … |
+| `grafo` | arma el grafo de tránsito sobre el terreno | `derivados/grafo.npz` |
+| `revisar` | traza **un** camino para que lo mires | `resultados/revision_pendiente.gpkg` |
+| `nulos` | genera el terreno aleatorio de comparación | `derivados/nulos.npz` |
+| `barrido` | prueba los 231 juegos de pesos, sector por sector | `resultados/optimos_por_sector.json` |
+| `resultados` | el perfil de equifinalidad y su gráfico | `resultados/perfil_equifinalidad.png` |
+
+### Dos advertencias sobre el orden
+
+**`nulos` va antes de `barrido`, y no es intercambiable.** Un sector cuyo mejor
+camino no le gana a terreno aleatorio no tiene pesos que valga la pena
+reportar. Si se corre al revés, se acaba comparando pesos de sectores donde el
+modelo no explica nada, y los números parecen válidos aunque no lo sean.
+
+**`revisar` es el paso que no se salta.** Traza un solo camino, poniendo todo el
+peso en la pendiente, y lo guarda en `resultados/revision_pendiente.gpkg`.
+Ábrelo en QGIS encima del modelo de elevación y míralo con ojos de arqueóloga:
+¿pasa por donde pasaría un camino?, ¿cruza una quebrada por donde se puede
+cruzar? Si ese camino no es plausible, ninguno de los que vienen después lo
+será, y no hay estadística que lo arregle.
+
+---
+
+## Lo primero que hay que mirar
+
+Al final de `python -m camino geocam`, el programa imprime cuántos metros de
+**polilínea continua** trajo de GeoCAM. Es el número que decide el diseño del
+estudio, y conviene mirarlo antes de seguir:
+
+- Si hay bastante camino continuo, se puede partir en sectores **y** validar en
+  bloques: ajustar los pesos en los sectores pares y medir qué tan bien
+  predicen los impares.
+- Si hay poco, las dos cosas compiten por los mismos metros, y hay que elegir
+  una. Esa decisión se toma **antes** de correr el barrido, no después de ver
+  los resultados.
+
+Si el tramo continuo más largo baja de unos 15 km, el programa lo avisa en
+pantalla.
+
+---
+
+## Los parámetros que vas a querer cambiar
+
+Todos viven en `config.yaml`, cada uno con su comentario explicando qué hace.
+Si un umbral aparece escrito dentro del código del programa, es un error.
+
+Tres que probablemente toques:
+
+**`componentes`** — qué variables del terreno entran al modelo.
+
+```yaml
+costo:
+  componentes: [pendiente, rugosidad, drenaje]
+```
+
+Con esas tres son 231 juegos de pesos y el barrido tarda media hora. Si añades
+`humedad`, pasan a ser 1771 y tarda unas dos horas. Empieza con tres.
+
+**`buffer_corredor`** — media anchura, en metros, de la franja alrededor del
+camino registrado por donde el modelo tiene permitido buscar.
+
+```yaml
+dominio:
+  buffer_corredor: 4000
+```
+
+Existe por una razón de cómputo: el área completa son tres millones y medio de
+celdas y no se pueden barrer. Pero si la franja es muy estrecha, es ella la que
+decide el resultado. Por eso `revisar` comprueba si el camino modelado se pegó
+al borde, y si avisa, hay que ensanchar este número y volver a correr desde
+`preparar`.
+
+**`umbral_quebrada`** — cuántas celdas de área drenada hacen que una celda
+cuente como quebrada.
+
+```yaml
+dominio:
+  umbral_quebrada: 500
+```
+
+500 celdas son 0.45 km² a 30 m de resolución. Es el único parámetro de todo el
+modelo que el trabajo de campo fija directamente: se calibra contra las
+quebradas que realmente haya que cruzar en el tramo.
+
+---
+
+## Los tracks del GPS
+
+Todavía no están: Dina camina del 8 al 15 de octubre. **Nada del pipeline se
+bloquea por eso.** Los tracks entran en la validación, al final; hasta que
+lleguen, el modelo se ajusta contra la geometría de GeoCAM sola, y todos los
+pasos de arriba corren igual.
+
+Cuando lleguen: conecta el Garmin por USB, entra a la carpeta
+`Garmin/Activities` del reloj y copia los `.gpx` a `datos/gpx/`. (También se
+pueden exportar uno por uno desde Garmin Connect.) El programa los lee de ahí,
+descarta los puntos con mala precisión y los tramos que van demasiado rápido
+para ser alguien caminando.
+
+---
+
+## Datos sensibles
 
 Las coordenadas de evidencias arqueológicas sensibles o no publicadas que
-salgan de GeoCAM o de los tracks **no entran al repositorio público**. El
-`.gitignore` ya excluye `datos/` y `derivados/` por eso. Lo que se publique
-tiene que pasar antes por las restricciones institucionales correspondientes.
+vengan de GeoCAM o de los tracks **no entran al repositorio público**. El
+archivo `.gitignore` ya excluye `datos/` y `derivados/` justamente por eso, y
+todo lo que hay en esas carpetas se puede regenerar corriendo los pasos otra
+vez, así que no se pierde nada por no versionarlas.
 
-## 9. Por qué no un GIS
+Lo que se publique tiene que pasar antes por las restricciones institucionales
+que correspondan.
+
+---
+
+## Si algo sale mal
+
+| Lo que dice la consola | Qué pasa |
+|---|---|
+| `ModuleNotFoundError` | falta `conda activate camino` |
+| `Falta la llave de OpenTopography` | el `set OPENTOPOGRAPHY_API_KEY=...` del paso 2, en esta misma ventana |
+| `Falta la URL del servicio de GeoCAM` | el paso 3; el propio mensaje repite las instrucciones |
+| `GeoCAM no devolvió ningún rasgo` | la dirección apunta a una capa que no es la del camino. Vuelve al paso 3 y prueba otra de las peticiones que aparecen en el panel Network |
+| `el camino modelado toca el borde del corredor` | sube `buffer_corredor` en `config.yaml` y vuelve a correr desde `preparar` |
+| `la pieza continua mide X m` | hay muy poco camino continuo para el número de sectores pedido: baja `n_sectores` en `config.yaml` |
+
+---
+
+## Por qué no se usa un GIS para esto
 
 - `r.cost` de GRASS es isotrópico: no distingue subir de bajar.
-- `r.walk` sí es anisotrópico, pero tiene la función de Langmuir cableada y no
-  admite pesos propios.
-- `skimage.graph.MCP_Geometric` es isotrópico.
-- QGIS no tiene nada equivalente.
+- `r.walk` sí distingue, pero tiene su propia función de marcha cableada por
+  dentro y no admite pesos elegidos por el usuario.
+- `MCP_Geometric` de scikit-image es isotrópico.
+- QGIS no trae nada equivalente.
 
-Ninguno permite barrer pesos sobre un costo anisotrópico, que es justo lo que
-pide la pregunta. De ahí el paquete: numpy y scipy, sin dependencias exóticas.
+Ninguno permite recorrer sistemáticamente juegos de pesos sobre un costo que
+distinga el sentido de la marcha, que es exactamente lo que pide la pregunta.
+De ahí el programa: numpy y scipy, sin dependencias raras.
