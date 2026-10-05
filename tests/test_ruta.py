@@ -98,7 +98,7 @@ class _SesionOSM:
     def __init__(self, elementos):
         self.elementos = elementos
 
-    def get(self, url, params=None, timeout=None, **kw):
+    def post(self, url, data=None, headers=None, timeout=None, **kw):
         class _R:
             status_code = 200
 
@@ -142,10 +142,12 @@ def test_lo_de_osm_queda_marcado_como_provisional(cfg):
 
 # ------------------------------------------------------------------ la CLI
 
-def test_la_cli_acepta_ruta_con_sus_opciones():
+def test_ruta_es_un_paso_del_pipeline_y_va_despues_de_bajar():
     from camino import cli
-    assert "ruta" in cli.AYUDAS
-    assert "ruta" not in cli.ORDEN
+    assert cli.ORDEN.index("bajar") < cli.ORDEN.index("ruta")
+    assert cli.ORDEN.index("ruta") < cli.ORDEN.index("preparar")
+    assert set(cli.ORDEN) == set(cli.PASOS)
+    assert "geocam" not in cli.ORDEN        # lo reemplazo 'ruta'
 
 
 def test_el_pipeline_no_exige_el_camino_para_preparar():

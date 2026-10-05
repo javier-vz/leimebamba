@@ -14,7 +14,6 @@ import pathlib
 import requests
 
 OPENTOPOGRAPHY = "https://portal.opentopography.org/API/globaldem"
-OVERPASS = "https://overpass-api.de/api/interpreter"
 COPERNICUS_S3 = "https://copernicus-dem-30m.s3.amazonaws.com"
 
 # Los DEM globales que cubren el area y se pueden bajar sin tramites.
@@ -53,24 +52,6 @@ def url_opentopography(bbox, demtype: str, api_key: str):
 
 def url_tile_copernicus(nombre: str) -> str:
     return f"{COPERNICUS_S3}/{nombre}/{nombre}.tif"
-
-
-def url_overpass(bbox):
-    """Consulta Overpass de rios y cuerpos de agua.
-
-    Overpass usa el orden (sur, oeste, norte, este), al contrario de casi
-    todo lo demas.
-    """
-    oeste, sur, este, norte = bbox
-    caja = f"{sur},{oeste},{norte},{este}"
-    consulta = (
-        "[out:json][timeout:180];"
-        f'(way["waterway"="river"]({caja});'
-        f' way["waterway"="stream"]({caja});'
-        f' way["natural"="water"]({caja});'
-        f' relation["natural"="water"]({caja}););'
-        "out geom;")
-    return OVERPASS, {"data": consulta}
 
 
 def params_geocam(bbox, offset: int = 0, por_pagina: int = 1000) -> dict:
@@ -140,10 +121,36 @@ def tile_copernicus(cfg, forzar: bool = False) -> list[pathlib.Path]:
             for t in tiles_copernicus(cfg.bbox)]
 
 
-def agua(cfg, forzar: bool = False) -> pathlib.Path:
-    url, params = url_overpass(cfg.bbox)
-    return baja(url, cfg.dir_datos / "agua_osm.json", params=params,
-                forzar=forzar)
+def agua(cfg, forzar: bool = False) -> pathlib.Path | None:
+    """Cuerpos de agua permanentes, de OpenStreetMap.
+
+    Es un insumo OPCIONAL: sin el, la mascara simplemente no excluye lagunas
+    ni el cauce de los rios grandes. Si Overpass no responde, se avisa y se
+    sigue; no se tumba la corrida entera por esto.
+    """
+    import json
+
+    from . import osm
+
+    destino = cfg.dir_datos / "agua_osm.json"
+    if destino.exists() and destino.stat().st_size > 0 and not forzar:
+        print(f"  ya esta: {destino.name}")
+        return destino
+
+    print("  consultando Overpass (OpenStreetMap)", flush=True)
+    try:
+        d = osm.consulta(osm.consulta_agua(cfg.bbox))
+    except RuntimeError as e:
+        print(f"\n  AVISO: no se pudo bajar el agua de OpenStreetMap.\n  {e}")
+        print("\n  No es grave y no bloquea nada: es un insumo opcional. La")
+        print("  mascara quedara sin excluir lagunas ni cauces grandes. Para")
+        print("  reintentarlo mas tarde:  python -m camino bajar --forzar")
+        return None
+
+    destino.write_text(json.dumps(d), encoding="utf-8")
+    n = len(d.get("elements", []))
+    print(f"  {n} elementos de agua")
+    return destino
 
 
 def camino_registrado(cfg, forzar: bool = False) -> pathlib.Path:

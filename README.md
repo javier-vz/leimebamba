@@ -67,7 +67,7 @@ Tarda unos minutos la primera vez. Comprueba que quedó bien:
 python -m pytest -q
 ```
 
-Tienen que pasar **178 pruebas** en dos o tres segundos. Si falla algo aquí,
+Tienen que pasar **194 pruebas** en dos o tres segundos. Si falla algo aquí,
 falla antes de tocar datos, que es cuando conviene.
 
 > **Cada vez que abras la consola de nuevo**, dos cosas: `conda activate
@@ -298,6 +298,7 @@ restricciones institucionales que correspondan.
 |---|---|
 | `ModuleNotFoundError` | falta `conda activate camino` |
 | `Falta la llave de OpenTopography` | el `set OPENTOPOGRAPHY_API_KEY=...` del §3, en esta misma ventana |
+| `no se pudo bajar el agua de OpenStreetMap` | Overpass está saturado. **No bloquea nada**: la máscara queda sin excluir lagunas. Reintenta luego con `python -m camino bajar --forzar` |
 | `Falta la dirección de GeoCAM` | corre `python -m camino buscar`, o usa otra fuente (§5) |
 | `Proxy Error … SSL Handshake` | el servidor del Ministerio está caído. No es tuyo. Usa otra fuente (§5) |
 | `Ningún endpoint WFS respondió` | lo mismo; el programa ya probó cuatro rutas, dos veces |

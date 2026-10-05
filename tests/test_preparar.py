@@ -182,9 +182,9 @@ def test_la_url_de_opentopography_lleva_la_caja_y_la_llave(cfg):
 
 
 def test_overpass_usa_su_propio_orden_de_coordenadas(cfg):
-    _, p = descarga.url_overpass(cfg.bbox)
+    from camino import osm
     oeste, sur, este, norte = cfg.bbox
-    assert f"{sur},{oeste},{norte},{este}" in p["data"]
+    assert f"{sur},{oeste},{norte},{este}" in osm.consulta_agua(cfg.bbox)
 
 
 def test_los_parametros_de_geocam_paginan(cfg):

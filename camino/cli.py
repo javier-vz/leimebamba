@@ -13,7 +13,7 @@ from . import buscar, config, pipeline, ruta as _ruta
 
 PASOS = {
     "bajar": (pipeline.bajar, "DEM (dos fuentes) y cuerpos de agua"),
-    "geocam": (pipeline.geocam, "el camino registrado, del servidor del Ministerio"),
+    "ruta": (None, "el camino observado: de GeoCAM, de un archivo tuyo o de OSM"),
     "preparar": (pipeline.preparar_rasteres, "alinear los DEM y armar la mascara del corredor"),
     "superficies": (pipeline.construir_superficies, "pendiente, rugosidad, drenaje y humedad"),
     "grafo": (pipeline.construir_grafo, "el grafo dirigido y la matriz Phi"),
@@ -23,18 +23,16 @@ PASOS = {
     "resultados": (pipeline.resultados, "el perfil de equifinalidad y su figura"),
 }
 
-ORDEN = ("bajar", "geocam", "preparar", "superficies", "grafo", "revisar",
+ORDEN = ("bajar", "ruta", "preparar", "superficies", "grafo", "revisar",
          "nulos", "barrido", "resultados")
 
 # Ayudas que no son parte del pipeline: se corren cuando hacen falta.
 AYUDAS = {
     "buscar": (buscar.informe,
                "encuentra la direccion del servicio de GeoCAM y la guarda"),
-    "ruta": (None,
-             "trae el camino observado: de GeoCAM, de un archivo tuyo o de OSM"),
 }
 
-_FORZABLES = {"bajar", "geocam"}
+_FORZABLES = {"bajar"}
 
 
 def main(argv=None) -> int:
@@ -61,11 +59,6 @@ def main(argv=None) -> int:
 
     cfg = config.Config.cargar(args.config)
 
-    if args.paso == "ruta":
-        print(f"=== ruta: trayendo el camino observado desde '{args.fuente}' ===")
-        _ruta.importar(cfg, args.fuente, args.archivo, forzar=args.forzar)
-        return 0
-
     if args.paso in AYUDAS:
         fn, texto = AYUDAS[args.paso]
         print(f"=== {args.paso}: {texto} ===")
@@ -78,7 +71,9 @@ def main(argv=None) -> int:
         fn, texto = PASOS[nombre]
         print(f"\n=== {nombre}: {texto} ===")
         t0 = time.perf_counter()
-        if nombre in _FORZABLES:
+        if nombre == "ruta":
+            _ruta.importar(cfg, args.fuente, args.archivo, forzar=args.forzar)
+        elif nombre in _FORZABLES:
             fn(cfg, forzar=args.forzar)
         else:
             fn(cfg)

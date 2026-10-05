@@ -66,55 +66,26 @@ def desde_archivo(cfg, ruta):
 
 
 def consulta_osm(bbox) -> str:
-    """Consulta Overpass de trazas que puedan ser el camino.
-
-    Se piden las vias con etiqueta `historic` y las que llevan 'inca',
-    'qhapaq' o 'camino' en el nombre. No se piden todos los senderos: en los
-    Andes hay miles y ninguno dice de cual se trata.
-    """
-    oeste, sur, este, norte = bbox
-    caja = f"{sur},{oeste},{norte},{este}"
-    return (
-        "[out:json][timeout:180];"
-        f'(way["historic"]({caja});'
-        f' way["name"~"[Ii]nca|[Qq]hapaq|[Cc]amino|[Ññ]an"]({caja});'
-        f' relation["route"="hiking"]({caja});'
-        f' way["highway"="path"]["name"~"[Ii]nca|[Qq]hapaq"]({caja}););'
-        "out geom;")
+    """La consulta de Overpass para trazas que puedan ser el camino."""
+    from . import osm
+    return osm.consulta_camino(bbox)
 
 
 def desde_osm(cfg, sesion=None):
     """Trazas de OpenStreetMap, como apano provisional."""
-    import geopandas as gpd
-    from shapely.geometry import LineString
+    from . import osm
 
-    sesion = sesion or requests.Session()
-    r = sesion.get("https://overpass-api.de/api/interpreter",
-                   params={"data": consulta_osm(cfg.bbox)}, timeout=300)
-    r.raise_for_status()
-    d = r.json()
+    d = osm.consulta(osm.consulta_camino(cfg.bbox), sesion=sesion)
+    g = osm.lineas(d, cfg.crs)
 
-    filas, geoms = [], []
-    for el in d.get("elements", []):
-        pts = [(p["lon"], p["lat"]) for p in el.get("geometry", []) or []]
-        if len(pts) < 2:
-            continue
-        tags = el.get("tags", {})
-        filas.append({"osm_id": el.get("id"),
-                      "nombre": tags.get("name", ""),
-                      "historic": tags.get("historic", ""),
-                      "highway": tags.get("highway", ""),
-                      "fuente": "osm_provisional"})
-        geoms.append(LineString(pts))
-
-    if not geoms:
+    if g.empty:
         raise SystemExit(
             "OpenStreetMap no tiene ninguna traza etiquetada como camino inca\n"
             "en esa caja. Queda importar un archivo propio:\n"
-            "  python -m camino ruta --archivo mi_camino.gpx")
+            "  python -m camino ruta --fuente archivo --archivo mi_camino.gpx")
 
-    return gpd.GeoDataFrame(filas, geometry=geoms,
-                            crs="EPSG:4326").to_crs(cfg.crs)
+    g["fuente"] = "osm_provisional"
+    return g
 
 
 def importar(cfg, fuente: str = "geocam", archivo=None, forzar: bool = False):

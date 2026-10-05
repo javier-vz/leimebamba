@@ -29,15 +29,10 @@ def _guarda_json(cfg, nombre, obj):
 def bajar(cfg, forzar=False):
     print("DEM (dos fuentes, para tener la banda de incertidumbre):")
     rutas = descarga.dems(cfg, forzar=forzar)
-    print("Cuerpos de agua (OpenStreetMap):")
+    print("\nCuerpos de agua (OpenStreetMap) -- opcional:")
     descarga.agua(cfg, forzar=forzar)
     print("\nLa red de drenaje no se baja: se deriva del DEM en 'superficies'.")
     return rutas
-
-
-def geocam(cfg, forzar=False):
-    print("Camino registrado (GeoCAM):")
-    return descarga.camino_registrado(cfg, forzar=forzar)
 
 
 # --------------------------------------------------------- 2. preparar
