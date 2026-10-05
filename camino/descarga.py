@@ -1,0 +1,212 @@
+"""Descarga de los insumos: DEM, camino registrado y cuerpos de agua.
+
+La red de drenaje NO se descarga: se deriva del DEM en `hidrologia.py`.
+
+Las URL se arman con funciones puras (`url_*`, `params_*`) para poder
+probarlas sin red. Lo unico que toca internet es `baja()`.
+"""
+
+from __future__ import annotations
+
+import math
+import pathlib
+
+import requests
+
+OPENTOPOGRAPHY = "https://portal.opentopography.org/API/globaldem"
+OVERPASS = "https://overpass-api.de/api/interpreter"
+COPERNICUS_S3 = "https://copernicus-dem-30m.s3.amazonaws.com"
+
+# Los DEM globales que cubren el area y se pueden bajar sin tramites.
+DEMS = ("COP30", "AW3D30")
+
+
+def tiles_copernicus(bbox) -> list[str]:
+    """Nombres de los tiles de Copernicus GLO-30 que cubren la caja.
+
+    El nombre lleva la esquina SUROESTE del tile de 1 x 1 grado, asi que
+    hay que tomar el piso de cada coordenada. `S07_00_W078_00` cubre
+    latitud -7 a -6 y longitud -78 a -77.
+    """
+    oeste, sur, este, norte = bbox
+    nombres = []
+    for lat in range(math.floor(sur), math.floor(norte) + 1):
+        for lon in range(math.floor(oeste), math.floor(este) + 1):
+            ns = "N" if lat >= 0 else "S"
+            ew = "E" if lon >= 0 else "W"
+            nombres.append(
+                f"Copernicus_DSM_COG_10_{ns}{abs(lat):02d}_00_"
+                f"{ew}{abs(lon):03d}_00_DEM")
+    return nombres
+
+
+def url_opentopography(bbox, demtype: str, api_key: str):
+    """URL y parametros del recorte ya hecho por el servicio."""
+    oeste, sur, este, norte = bbox
+    return OPENTOPOGRAPHY, {
+        "demtype": demtype,
+        "south": sur, "north": norte, "west": oeste, "east": este,
+        "outputFormat": "GTiff",
+        "API_Key": api_key,
+    }
+
+
+def url_tile_copernicus(nombre: str) -> str:
+    return f"{COPERNICUS_S3}/{nombre}/{nombre}.tif"
+
+
+def url_overpass(bbox):
+    """Consulta Overpass de rios y cuerpos de agua.
+
+    Overpass usa el orden (sur, oeste, norte, este), al contrario de casi
+    todo lo demas.
+    """
+    oeste, sur, este, norte = bbox
+    caja = f"{sur},{oeste},{norte},{este}"
+    consulta = (
+        "[out:json][timeout:180];"
+        f'(way["waterway"="river"]({caja});'
+        f' way["waterway"="stream"]({caja});'
+        f' way["natural"="water"]({caja});'
+        f' relation["natural"="water"]({caja}););'
+        "out geom;")
+    return OVERPASS, {"data": consulta}
+
+
+def params_geocam(bbox, offset: int = 0, por_pagina: int = 1000) -> dict:
+    """Parametros de una consulta espacial a un FeatureServer de ArcGIS.
+
+    OJO con el CRS: con `f=geojson` ArcGIS devuelve SIEMPRE WGS84, se pida
+    lo que se pida en `outSR`, porque el formato GeoJSON lo exige. La
+    reproyeccion se hace despues, en geopandas.
+    """
+    oeste, sur, este, norte = bbox
+    return {
+        "where": "1=1",
+        "geometry": f"{oeste},{sur},{este},{norte}",
+        "geometryType": "esriGeometryEnvelope",
+        "inSR": 4326,
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "*",
+        "returnGeometry": "true",
+        "f": "geojson",
+        "resultOffset": int(offset),
+        "resultRecordCount": int(por_pagina),
+    }
+
+
+def baja(url: str, destino: pathlib.Path, params=None, forzar: bool = False,
+         timeout: int = 900) -> pathlib.Path:
+    """Descarga con escritura en bloques y salto si el archivo ya esta."""
+    destino = pathlib.Path(destino)
+    if destino.exists() and destino.stat().st_size > 0 and not forzar:
+        print(f"  ya esta: {destino.name} "
+              f"({destino.stat().st_size / 1e6:.1f} MB)")
+        return destino
+
+    print(f"  bajando: {destino.name}", flush=True)
+    parcial = destino.with_suffix(destino.suffix + ".parcial")
+    with requests.get(url, params=params, stream=True, timeout=timeout) as r:
+        r.raise_for_status()
+        with open(parcial, "wb") as f:
+            for trozo in r.iter_content(1 << 20):
+                f.write(trozo)
+    parcial.replace(destino)
+    print(f"           {destino.stat().st_size / 1e6:.1f} MB")
+    return destino
+
+
+# ------------------------------------------------------------------ pasos
+
+def dems(cfg, forzar: bool = False) -> dict[str, pathlib.Path]:
+    """Baja los dos DEM recortados. Devuelve {nombre: ruta}.
+
+    Bajar dos no es redundancia: la diferencia entre ellos ES la banda de
+    incertidumbre vertical del modelo, y no cuesta nada tenerla.
+    """
+    llave = cfg.exige_llave()
+    salida = {}
+    for dem in DEMS:
+        url, params = url_opentopography(cfg.bbox, dem, llave)
+        salida[dem] = baja(url, cfg.dir_datos / f"{dem.lower()}_raw.tif",
+                           params=params, forzar=forzar)
+    return salida
+
+
+def tile_copernicus(cfg, forzar: bool = False) -> list[pathlib.Path]:
+    """Alternativa sin llave: los tiles completos desde el bucket publico."""
+    return [baja(url_tile_copernicus(t), cfg.dir_datos / f"{t}.tif",
+                 forzar=forzar)
+            for t in tiles_copernicus(cfg.bbox)]
+
+
+def agua(cfg, forzar: bool = False) -> pathlib.Path:
+    url, params = url_overpass(cfg.bbox)
+    return baja(url, cfg.dir_datos / "agua_osm.json", params=params,
+                forzar=forzar)
+
+
+def camino_registrado(cfg, forzar: bool = False) -> pathlib.Path:
+    """Trae el camino de GeoCAM, pagina por pagina, a un GeoPackage.
+
+    Al final imprime el numero que decide el diseno del estudio: cuantos
+    metros de polilinea CONTINUA hay. Si el tramo continuo mas largo es
+    corto, sectores y validacion bloqueada compiten por los mismos metros y
+    hay que elegir una de las dos.
+    """
+    import geopandas as gpd
+    import pandas as pd
+
+    destino = cfg.dir_datos / "qn_geocam.gpkg"
+    if destino.exists() and not forzar:
+        print(f"  ya esta: {destino.name}")
+        return destino
+
+    servicio = cfg.exige_geocam()
+    trozos, offset = [], 0
+    while True:
+        r = requests.get(f"{servicio}/query",
+                         params=params_geocam(cfg.bbox, offset), timeout=300)
+        r.raise_for_status()
+        j = r.json()
+        if "error" in j:
+            raise SystemExit(f"GeoCAM devolvio un error: {j['error']}")
+        rasgos = j.get("features", [])
+        print(f"  offset {offset}: {len(rasgos)} rasgos")
+        if not rasgos:
+            break
+        trozos.append(gpd.GeoDataFrame.from_features(rasgos, crs="EPSG:4326"))
+        if len(rasgos) < 1000:
+            break
+        offset += len(rasgos)
+
+    if not trozos:
+        raise SystemExit("GeoCAM no devolvio ningun rasgo en esa caja")
+
+    qn = gpd.GeoDataFrame(pd.concat(trozos, ignore_index=True),
+                          crs="EPSG:4326").to_crs(cfg.crs)
+    qn.to_file(destino, layer="camino", driver="GPKG")
+    resumen(qn)
+    return destino
+
+
+def resumen(qn) -> dict:
+    """El diagnostico que hay que mirar antes de modelar nada."""
+    lineas = qn[qn.geometry.geom_type.isin(["LineString", "MultiLineString"])]
+    largos = lineas.geometry.length
+    info = {
+        "rasgos": int(len(qn)),
+        "lineas": int(len(lineas)),
+        "largo_total_km": round(float(largos.sum()) / 1000, 2) if len(lineas) else 0.0,
+        "continuo_max_km": round(float(largos.max()) / 1000, 2) if len(lineas) else 0.0,
+        "tipos": qn.geometry.geom_type.value_counts().to_dict(),
+        "campos": [c for c in qn.columns if c != "geometry"],
+    }
+    print("\n  --- lo primero que hay que mirar ---")
+    for k, v in info.items():
+        print(f"  {k}: {v}")
+    if info["continuo_max_km"] < 15:
+        print("\n  AVISO: con menos de ~15 km continuos, partir en sectores y")
+        print("  validar en bloques compiten por los mismos metros. Hay que")
+        print("  elegir una de las dos ANTES de correr el barrido.")
+    return info

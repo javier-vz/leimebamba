@@ -1,0 +1,78 @@
+# Parametros del estudio. Todo numero discutible vive aqui.
+# Tramo Leimebamba - Chachapoyas, Amazonas.
+
+extension:
+  # Caja que contiene el tramo, en grados. Leimebamba esta en -6.70 y
+  # Chachapoyas en -6.23; el margen deja sitio para que el corredor no
+  # quede pegado al borde del DEM.
+  bbox:
+    oeste: -78.05
+    sur: -6.80
+    este: -77.70
+    norte: -6.15
+  crs: EPSG:32718          # UTM 18S, metrico: las distancias salen en metros
+  resolucion: 30           # m, la del Copernicus GLO-30
+
+datos:
+  # Dejala vacia y usa la variable de entorno OPENTOPOGRAPHY_API_KEY, para
+  # que la llave no acabe en el control de versiones.
+  api_key_opentopography: ""
+
+  # URL del servicio ArcGIS de GeoCAM, sin el /query final. Hay que sacarla
+  # del navegador una sola vez: `python -m camino geocam` explica como.
+  geocam_servicio: ""
+
+costo:
+  # Borde de validez del ajuste de Minetti et al. 2002. No es estetico:
+  # fuera de +-0.45 la polinomial se dispara. Las aristas con |g| mayor se
+  # ELIMINAN del grafo, no se recortan.
+  g_max: 0.45
+
+  # Desplazamiento que impide costos nulos. Con aristas de costo cero,
+  # Dijkstra devuelve caminos degenerados.
+  epsilon: 0.01
+
+  # Escalado robusto de cada componente. Percentiles y no minimo-maximo: un
+  # pixel de ruido en el DEM no debe fijar la escala de la superficie.
+  percentiles: [5.0, 95.0]
+
+  # Las componentes del costo, en orden. "pendiente" tiene que ir primera y
+  # es la unica anisotropica. Empieza con tres (231 vectores de peso);
+  # agrega "humedad" para pasar a cuatro (1771).
+  componentes: [pendiente, rugosidad, drenaje]
+
+  # 16 y no 8: con 8 vecinos los caminos solo giran en pasos de 45 grados y
+  # se alargan hasta 8.2%. Con 16 el sesgo baja a 2.8%.
+  vecindad: 16
+
+dominio:
+  # Media anchura del corredor alrededor del camino registrado, en metros.
+  # Si el camino modelado toca el borde, es el buffer el que esta decidiendo
+  # el resultado: hay que ensancharlo. El codigo avisa.
+  buffer_corredor: 4000
+
+  # Celdas de area acumulada a partir de las cuales una celda es quebrada.
+  # 500 celdas a 30 m = 0.45 km2. Es el UNICO parametro del modelo que el
+  # trabajo de campo fija directamente: se calibra contra las quebradas que
+  # realmente haya que cruzar.
+  umbral_quebrada: 500
+
+barrido:
+  # Paso de la red del simplex: h = 1/n_simplex. Con 20, K=3 da 231
+  # vectores y K=4 da 1771.
+  n_simplex: 20
+
+  # Sectores en que se parte el camino registrado. OJO: con poco camino
+  # continuo, sectores y validacion bloqueada compiten por los mismos
+  # metros. Hay que elegir una de las dos ANTES de correr nada.
+  n_sectores: 6
+
+  # Superficies nulas por sector. El piso del valor p es 1/(M+1): con 500
+  # no se puede reportar p < 0.002, se reporta p = 0.002 con M = 500.
+  m_nulos: 500
+
+  # Margen maximo del perfil de equifinalidad: S(tau) con tau en [0, este].
+  tau_max: 0.5
+
+  semilla: 20261005
+  n_trabajos: -1           # -1 = todos los nucleos

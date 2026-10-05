@@ -1,0 +1,89 @@
+"""Las dos distancias, sobre casos de valor conocido."""
+
+import numpy as np
+import pytest
+
+from camino import metricas
+
+
+def segmento(largo=1000.0, n=51, y=0.0):
+    return np.column_stack([np.linspace(0.0, largo, n), np.full(n, y)])
+
+
+def test_frechet_de_una_curva_consigo_misma_es_cero():
+    P = segmento()
+    assert metricas.frechet_discreta(P, P) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_frechet_de_dos_paralelas_es_la_separacion():
+    assert metricas.frechet_discreta(segmento(y=0.0), segmento(y=37.0)) \
+        == pytest.approx(37.0, abs=1e-6)
+
+
+def test_frechet_respeta_el_orden_del_recorrido():
+    """Frechet y distancia media NO son la misma cosa: sobre un segmento y
+    su reverso los puntos coinciden (media = 0) pero el recorrido es
+    incompatible (Frechet = el largo del segmento)."""
+    P = segmento(1000.0)
+    Q = P[::-1]
+    assert metricas.distancia_media_simetrica(P, Q) == pytest.approx(0.0, abs=1e-9)
+    assert metricas.frechet_discreta(P, Q) == pytest.approx(1000.0, abs=1.0)
+
+
+def test_frechet_castiga_un_desvio_puntual_que_la_media_diluye():
+    P = segmento(1000.0, 201)
+    Q = P.copy()
+    Q[100, 1] = 300.0                 # un solo vertice muy desviado
+    assert metricas.frechet_discreta(P, Q) > 250.0
+    assert metricas.distancia_media_simetrica(P, Q) < 20.0
+
+
+def test_distancia_media_de_dos_paralelas():
+    assert metricas.distancia_media_simetrica(segmento(y=0.0), segmento(y=12.0)) \
+        == pytest.approx(12.0, abs=1e-6)
+
+
+def test_distancia_media_es_simetrica():
+    P, Q = segmento(y=0.0), segmento(800.0, 37, y=25.0)
+    assert metricas.distancia_media_simetrica(P, Q) \
+        == pytest.approx(metricas.distancia_media_simetrica(Q, P))
+
+
+def test_distancia_de_una_curva_consigo_misma_es_cero():
+    P = segmento()
+    assert metricas.distancia_media_simetrica(P, P) == pytest.approx(0.0)
+
+
+def test_caminos_vacios_dan_infinito():
+    vacio = np.empty((0, 2))
+    assert metricas.distancia_media_simetrica(vacio, segmento()) == np.inf
+    assert metricas.frechet_discreta(segmento(), vacio) == np.inf
+
+
+def test_remuestrea_conserva_extremos_y_equiespacia():
+    P = np.array([[0.0, 0.0], [100.0, 0.0], [100.0, 100.0]])
+    R = metricas.remuestrea(P, 21)
+    assert R.shape == (21, 2)
+    assert R[0] == pytest.approx(P[0])
+    assert R[-1] == pytest.approx(P[-1])
+    paso = np.linalg.norm(np.diff(R, axis=0), axis=1)
+    assert paso.std() < 1e-6
+
+
+def test_remuestrear_no_cambia_la_frechet_de_paralelas():
+    a = metricas.frechet_discreta(segmento(n=11, y=0), segmento(n=501, y=5.0))
+    assert a == pytest.approx(5.0, abs=1e-6)
+
+
+def test_longitud():
+    assert metricas.longitud(segmento(1000.0)) == pytest.approx(1000.0)
+    assert metricas.longitud(np.array([[0.0, 0.0]])) == 0.0
+
+
+def test_toca_borde_detecta_el_camino_pegado_al_corredor():
+    m = np.zeros((10, 10), dtype=bool)
+    m[3:7, 3:7] = True
+    adentro = np.array([[5, 5]])
+    pegado = np.array([[5, 5], [3, 3]])
+    assert not metricas.toca_borde(adentro, m)
+    assert metricas.toca_borde(pegado, m)
