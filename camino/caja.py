@@ -51,6 +51,20 @@ def _celdas(cfg, bbox) -> tuple[int, int]:
     return int(round((xmax - xmin) / res)), int(round((ymax - ymin) / res))
 
 
+def _mayor_continua(geometria) -> float:
+    """Largo de la pieza continua mayor de una geometria lineal."""
+    from shapely.ops import linemerge
+
+    if geometria.is_empty:
+        return 0.0
+    if geometria.geom_type == "LineString":
+        return float(geometria.length)
+    unido = linemerge(geometria)
+    piezas = (list(unido.geoms) if unido.geom_type == "MultiLineString"
+              else [unido])
+    return float(max((p.length for p in piezas), default=0.0))
+
+
 def _une(cajas):
     """Caja que contiene a todas."""
     o = min(c[0] for c in cajas)
@@ -80,9 +94,9 @@ def informe(cfg) -> dict:
             "Esta fuente no trae tramos con nombre, asi que no hay nada que\n"
             "medir por tramo (un GPX o unas trazas de OSM no los traen).")
 
-    # Lo mismo que hace `ruta`: un grupo de 'tramnomb' repartido por el mapa
-    # no es un tramo, y aqui pesa el doble porque arrastra la caja propuesta.
-    qn, no_tramos = registro.separa_los_que_no_son_tramos(cfg, qn)
+    # Lo mismo que hace `ruta`, para que las dos salidas hablen del mismo
+    # registro.
+    qn, _ = registro.aplica_exclusiones(cfg, qn)
     if qn.empty:
         raise SystemExit("no quedo ningun tramo despues del filtro")
 
@@ -93,23 +107,25 @@ def informe(cfg) -> dict:
     filas = []
     for nombre, sub in qn.groupby(qn["tramnomb"].fillna("(sin nombre)")):
         try:
-            pieza = preparar.lineas_unidas(sub)[0]       # la unidad real
-        except (ValueError, IndexError):
+            piezas = preparar.lineas_unidas(sub)
+        except ValueError:
             continue
-        dentro = sub[sub.intersects(recorte)]
-        if dentro.empty:
+        # La pieza continua mayor DE LAS QUE TOCAN LA CAJA, no la mayor del
+        # grupo. Si no, para un grupo disperso se mide una pieza que esta en
+        # otro departamento y la caja propuesta se va al otro lado del pais:
+        # es lo que hacia que 'En proceso' pidiera 582 M de celdas.
+        tocan = [p for p in piezas if p.intersects(recorte)]
+        if not tocan:
             continue
-        cortado = gpd.clip(dentro, recorte)
-        try:
-            en_caja = preparar.lineas_unidas(cortado)[0].length
-        except (ValueError, IndexError):
-            en_caja = 0.0
+        pieza = tocan[0]
+        en_caja = _mayor_continua(pieza.intersection(recorte))
         filas.append({
             "tramo": str(nombre),
             "continuo_en_la_caja_km": round(en_caja / 1000, 2),
             "continuo_completo_km": round(pieza.length / 1000, 2),
             "entra_completo": bool(pieza.length - en_caja < cfg.resolucion),
             "caja": _bbox_grados(cfg, pieza),
+            "aviso": registro.avisa_si_parece_etiqueta(sub, str(nombre)),
         })
 
     if not filas:
@@ -128,6 +144,12 @@ def informe(cfg) -> dict:
               f"{f['continuo_completo_km']:9.2f}  {cuenta} {marca}")
     print(f"  (km continuos; * pasa el filtro de "
           f"{cfg.largo_min_unidad / 1000:.0f} km)")
+    avisos = [f["aviso"] for f in filas if f.get("aviso")]
+    if avisos:
+        print("\n  --- grupos que parecen ETIQUETAS y no tramos ---")
+        for a in avisos:
+            print(f"  {a}")
+
     print("\n  CORTADO quiere decir que el tramo SIGUE fuera de la caja, asi")
     print("  que ensancharla te daria mas unidad. No es lo mismo que el aviso")
     print("  de 'revisar', que marca la unidad cuyo trazado LLEGA al borde --")

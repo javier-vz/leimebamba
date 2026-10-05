@@ -25,11 +25,23 @@ están en [`METODO.md`](METODO.md).
 
 ## 1. Cómo está organizada la carpeta
 
-Descomprime el zip donde guardes tus proyectos, en una ruta sin espacios ni
-tildes. Por ejemplo `C:\proyectos\camino_leimebamba`.
+El zip trae dentro una carpeta llamada `leimebamba/`. Descomprímelo **en la
+carpeta que la contiene** (`C:\Users\jvera\Documents`), no dentro de
+`leimebamba`: así cae encima de la que ya tienes y reemplaza el programa sin
+tocar `datos/`, `derivados/` ni `resultados/`.
+
+Para comprobar que quedó la versión nueva, cualquier comando imprime ahora
+su versión y la carpeta desde la que corre:
 
 ```
-camino_leimebamba/
+camino 0.5.0 (2026-10-05)
+proyecto: C:\Users\jvera\Documents\leimebamba
+```
+
+Si ahí sale otra carpeta, estás corriendo otra copia.
+
+```
+leimebamba/
 │
 ├── config.yaml          ← el único archivo que vas a editar
 ├── environment.yml         receta del entorno de conda
@@ -57,7 +69,7 @@ Abre la **consola de Anaconda** (en Windows, *Anaconda Prompt*; búscala en el
 menú de inicio). Entra a la carpeta y crea el entorno:
 
 ```bash
-cd C:\proyectos\camino_leimebamba
+cd C:\Users\jvera\Documents\leimebamba
 conda env create -f environment.yml
 conda activate camino
 ```
@@ -101,6 +113,41 @@ al repositorio sin querer.
 ---
 
 ## 4. Correr el estudio
+
+### El orden, de una vez
+
+**Si cambiaste `extension.bbox`** (o es la primera vez), tres comandos:
+
+```bash
+python -m camino bajar --forzar    # el DEM de la caja nueva
+python -m camino ruta  --forzar    # el recorte del registro, de la caja nueva
+python -m camino todo              # el resto, de corrido
+```
+
+Los dos `--forzar` son obligatorios y no son opcionales de estilo: cambiar la
+caja invalida **todo** lo que hay en `datos/` y `derivados/`. El programa ya
+detecta solo el caso del DEM y lo vuelve a bajar avisando, pero con el
+`--forzar` no hay nada que detectar.
+
+**Si NO cambiaste la caja**, uno:
+
+```bash
+python -m camino todo
+```
+
+Salta `bajar` y `ruta` porque los archivos ya están, y rehace el resto.
+
+**Para decidir la caja**, antes de todo lo anterior:
+
+```bash
+python -m camino ruta --forzar
+python -m camino caja
+```
+
+**Nunca** `python -m camino todo --forzar`: vuelve a bajar los DEM sin
+necesidad y son varios minutos.
+
+---
 
 Diez pasos, en orden. Cada uno deja su resultado en disco, así que puedes
 parar y seguir otro día sin perder nada.
@@ -162,19 +209,48 @@ contrasta nada), con 4 hay 6, con 6 hay 15.
 ### Cuidado con `tramnomb`: no todos los valores son tramos
 
 El registro usa ese campo para dos cosas. Casi todos los valores son tramos
-("A – B"), pero **`En proceso` es un estado de trabajo del Ministerio** y
-aparece en rasgos repartidos por todo el país. Agrupado por nombre, su caja
-envolvente va de Ayacucho a Amazonas: 551 × 924 km. Si entra al análisis,
-propone una caja 180 veces más grande que la necesaria y pone a comparar los
-pesos de un camino con los de una etiqueta administrativa.
+("A – B"), pero también hay **estados de trabajo del Ministerio** (`En
+proceso`, y `En Proceso` con otra grafía) y rasgos **sin nombre**. Agrupados
+por nombre, dan "tramos" cuya caja envolvente mide mil kilómetros de
+diagonal.
 
-El programa lo detecta por la diagonal y lo quita **antes** de recortar a la
-caja — una vez recortado, un grupo disperso parece local y ya no se
-distingue. Se ajusta con `datos.diagonal_max_tramo` (150 km por omisión) y
-`datos.tramos_excluidos`, para quitar alguno a mano.
+Se excluyen **a mano**, por nombre exacto, en `datos.tramos_excluidos`:
 
-Si ya corriste `ruta` antes de esto, el `qn_geocam.gpkg` que tienes se hizo
-sin el filtro: vuelve a correr `python -m camino ruta --forzar`.
+```yaml
+datos:
+  tramos_excluidos:
+    - ""
+    - "En proceso"
+    - "En Proceso"
+```
+
+**Y no con una regla automática.** Hubo una —descartar los grupos con más de
+150 km de diagonal— y estaba mal: declaró que "no son tramos" Xauxa –
+Pachacámac (163 km), La Raya – Desaguadero (293), Pumpu – Pallasca (338) y
+Acostambo – Huamachuco (588), que son secciones reales del Qhapaq Ñan, varias
+inscritas en la UNESCO. El registro es nacional y hay tramos con nombre de
+cientos de kilómetros: ninguna regla geométrica los separa de una etiqueta
+con garantías.
+
+Lo que el programa sí hace es **medir y avisar**. Para cada grupo calcula la
+razón entre la diagonal de su caja y los kilómetros de línea que contiene. Un
+camino, por largo que sea, es al menos tan largo como la recta entre sus
+extremos, así que su razón ronda 1 (con los huecos del registro, 2 o 3). Una
+etiqueta repartida por el mapa tiene mucha diagonal y poca línea, y la razón
+se dispara. Cuando una unidad que **entra al análisis** pasa de 5, lo dice:
+
+```
+AVISO: estas unidades parecen ETIQUETAS del registro y no tramos:
+  'En proceso' tiene 12.4 km de linea repartidos en una caja de 80 km
+  de diagonal (razon 6.5). Eso parece una ETIQUETA del registro y no un
+  tramo. Si lo es, anadelo a 'datos.tramos_excluidos' en config.yaml.
+```
+
+La decisión es arqueológica y queda escrita en `config.yaml`, no enterrada en
+el código.
+
+Si ya corriste `ruta` antes de esto, vuelve a correr
+`python -m camino ruta --forzar`.
 
 ### Tres cosas sobre el orden
 

@@ -199,15 +199,14 @@ def importar(cfg, fuente: str = "auto", archivo=None, forzar: bool = False):
     else:
         raise SystemExit(f"fuente desconocida: {fuente}. Usa una de {FUENTES}")
 
-    # ANTES de recortar: un grupo de 'tramnomb' repartido por medio pais
-    # parece local una vez cortado por la caja, y entonces ya no se puede
-    # distinguir de un tramo de verdad.
+    # ANTES de recortar: la dispersion de un grupo solo se ve en la geometria
+    # completa. Una vez cortado por la caja, un grupo repartido por el pais
+    # parece local.
     from . import registro as _registro
-    qn, _ = _registro.separa_los_que_no_son_tramos(cfg, qn)
+    qn, _ = _registro.aplica_exclusiones(cfg, qn)
     if qn.empty:
         raise SystemExit(
-            "despues de quitar los grupos que no son tramos no quedo nada; "
-            "revisa 'datos.tramos_excluidos' y 'datos.diagonal_max_tramo'")
+            "despues de aplicar 'datos.tramos_excluidos' no quedo nada")
 
     qn = descarga.recorta(qn, cfg)
     if qn.empty:

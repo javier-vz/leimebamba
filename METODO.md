@@ -567,62 +567,39 @@ las proyecciones no alargan ni un metro la pieza continua mayor.
 ### Y `tramnomb` tampoco siempre nombra un tramo
 
 El mismo campo lleva dos clases de valor. Casi todos son tramos, con forma
-«A – B», pero **`En proceso` es un estado de trabajo**, no un lugar, y
-aparece en rasgos de todo el país. Agrupado por nombre, su caja envolvente
-mide 551 × 924 km de diagonal.
+«A – B», pero también hay estados de trabajo (`En proceso`, y `En Proceso`
+con otra grafía) y rasgos sin nombre. Agrupados por nombre, su caja
+envolvente mide mil kilómetros de diagonal.
 
-No es cosmético: si ese grupo pasa el filtro de longitud entra al análisis
-como unidad, y entonces el perfil de equifinalidad compara los pesos de un
-camino con los de una etiqueta administrativa. El filtro es la diagonal en
-términos absolutos —el tramo con nombre más largo por aquí es
-Chachapoyas–Jumbilla con 61 km— y no la dispersión relativa (diagonal
-partido por longitud), porque los tramos del registro vienen en pedazos con
-huecos y su diagonal ya excede su longitud, así que la razón relativa no
-separa limpiamente.
+No es cosmético: si uno de esos grupos pasa el filtro de longitud entra al
+análisis como unidad, y entonces el perfil de equifinalidad compara los pesos
+de un camino con los de una etiqueta administrativa.
 
-Se aplica **antes** de recortar a la caja. Después, un grupo repartido por
-el país parece local y la información que lo delataba está perdida.
+**La exclusión es manual, y eso es deliberado.** Se intentó una regla
+automática —descartar los grupos con más de 150 km de diagonal, umbral
+sacado de los tramos vecinos a la caja de Amazonas— y descartó como «no son
+tramos» a Xauxa–Pachacámac (163 km), La Raya–Desaguadero (293), Pumpu–Pallasca
+(338) y Acostambo–Huamachuco (588): secciones reales del Qhapaq Ñan, varias
+inscritas en la UNESCO. El registro es nacional, hay tramos con nombre de
+cientos de kilómetros, y ninguna regla geométrica los separa de una etiqueta
+con garantías. Un umbral así no es conservador: borra datos buenos en
+silencio.
 
-Si en algún momento interesa usarlas, es para otra pregunta: contrastar por
-dónde pasa el camino de mínimo costo contra por dónde se proyectó el tramo
-perdido. Eso es una validación del registro, no un ajuste del modelo, y los
-pesos tienen que venir ya fijados desde los sectores observados.
+Lo que el método sí hace es medir y avisar. Para cada grupo,
 
----
+$$\rho = \frac{\text{diagonal de su caja envolvente}}{\sum \text{longitud de sus rasgos}}$$
 
-## 8 ter. Validación bloqueada: la prueba que decide
+Un camino es al menos tan largo como la recta entre sus extremos, así que
+$\rho \approx 1$; con los huecos del registro sube a 2 o 3. Una etiqueta
+repartida por el mapa tiene $\rho$ de decenas o centenas. Cuando una unidad
+que entra al análisis pasa de 5, se avisa y se nombra. Quien decide es la
+arqueóloga, y la decisión queda escrita en `datos.tramos_excluidos`.
 
-El nulo de §8 responde «¿este trazado se parece al observado más que una ruta
-cualquiera por aquí?». No responde la otra pregunta, que es la del proyecto:
-**¿el espacio ceremonial aporta algo, o el ampliado gana sólo por tener más
-parámetros?**
-
-Para eso, por cada unidad:
-
-1. Se parte el trazado en $B = 4$ **bloques contiguos**.
-2. Los pesos se estiman minimizando $\bar D$ sobre los $B-1$ bloques restantes.
-3. Esos pesos, **sin recalibrar**, se evalúan sobre el bloque retenido.
-4. Se repite con cada bloque como retenido, y se comparan los dos modelos
-   bloque a bloque.
-
-$$\mathbf{w}^{(-k)} = \arg\min_{\mathbf{w}\in\Delta}
-\ \frac{1}{B-1}\sum_{b \ne k} D_b(\mathbf{w}),
-\qquad\text{se reporta } D_k\!\left(\mathbf{w}^{(-k)}\right)$$
-
-**Bloques contiguos y no una partición aleatoria**, y esto no es un detalle:
-puntos espacialmente próximos comparten terreno, así que repartirlos al azar
-entre ajuste y prueba filtra información de un lado al otro y el modelo parece
-generalizar cuando sólo está recordando. Es el error estándar en validación de
-modelos espaciales.
-
-El resultado que vale es el conteo: **en cuántos de los bloques retenidos gana
-el ampliado**. Si gana en la mitad o menos, la mejora que §5 reportaba era
-capacidad de ajuste y no información espacial, y el paquete lo dice con esas
-palabras en la consola. Es el único sitio del método donde el resultado puede
-ser «las componentes añadidas no aportan», y tiene que poder serlo: si ningún
-resultado posible refuta la hipótesis, no se está probando nada.
-
-`python -m camino validar`. Código: `camino/pipeline.py`, `validar`.
+Y en la ayuda `caja`, que mide qué bbox haría falta, lo que se mide de cada
+grupo es **la pieza continua mayor de las que tocan la caja actual**, no la
+mayor del grupo. Para un grupo disperso, la mayor del grupo está en otro
+departamento, y tomarla hacía que la caja propuesta se fuera al otro lado del
+país: 582 millones de celdas, 185 veces la necesaria.
 
 ## 9. Lo que este diseño no hace
 

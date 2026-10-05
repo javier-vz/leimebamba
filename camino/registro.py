@@ -85,69 +85,79 @@ def diagonal(gdf) -> float:
     return float(math.hypot(xmax - xmin, ymax - ymin))
 
 
-def no_es_un_tramo(gdf, diagonal_max: float) -> str:
-    """Razon por la que un grupo de `tramnomb` NO es un tramo, o "".
+def dispersion(gdf) -> tuple[float, float, float]:
+    """(diagonal, largo total, razon) de un grupo de 'tramnomb'.
 
-    Hace falta porque el registro usa el campo del nombre del tramo para dos
-    cosas distintas. La mayoria de los valores son tramos de verdad, con
-    forma "A - B". Pero hay al menos uno, "En proceso", que es un ESTADO DE
-    TRABAJO del Ministerio y aparece en rasgos repartidos por todo el pais:
-    agrupar por nombre lo convierte en un "tramo" cuya caja envolvente va de
-    Ayacucho a Amazonas, 551 x 924 km.
+    La razon es el discriminante util. Un camino, por largo que sea, es al
+    menos tan largo como la recta entre sus extremos, asi que su razon ronda
+    1; con los huecos del registro sube a 2 o 3. Una ETIQUETA repartida por
+    el mapa tiene una diagonal enorme y poca linea: la razon se dispara.
 
-    Eso no es un detalle cosmetico. Un grupo asi:
+    OJO, aqui esto solo INFORMA, no excluye. Un umbral automatico sobre esto
+    seria otra version del error que se cometio antes: se puso un limite
+    absoluto de 150 km a la diagonal, sacado de los tramos vecinos a la caja
+    de Amazonas, y descarto como "no es un tramo" a Xauxa - Pachacamac (163
+    km), La Raya - Desaguadero (293 km), Pumpu - Pallasca (338 km) y
+    Acostambo - Huamachuco (588 km), que son secciones reales del Qhapaq
+    Nan, varias de ellas inscritas en la UNESCO. El registro es nacional: hay
+    tramos con nombre de cientos de kilometros, y ninguna regla geometrica
+    los distingue de una etiqueta con garantias.
 
-      - propone una caja de estudio 180 veces mas grande que la necesaria
-      - y, si entrara al analisis como unidad, pondria a comparar los pesos
-        de un camino contra los de una etiqueta administrativa.
-
-    El criterio es la DIAGONAL, en terminos absolutos, y no la dispersion
-    relativa (diagonal partido por largo): los tramos del registro vienen en
-    pedazos con huecos, asi que su diagonal ya es mayor que su longitud y la
-    razon relativa no separa limpiamente. Un tramo con nombre, en cambio,
-    une dos lugares vecinos: el mas largo que aparece por aqui es
-    Chachapoyas - Jumbilla con 61 km completos. Mil kilometros no es un
-    tramo por ningun criterio.
+    Quien decide es la arqueologa, y la decision queda escrita en
+    'datos.tramos_excluidos'. El codigo mide y avisa.
     """
     d = diagonal(gdf)
-    if d > diagonal_max:
-        return (f"su caja envolvente mide {d / 1000:.0f} km de diagonal, "
-                f"mas del limite de {diagonal_max / 1000:.0f} km: no es un "
-                "tramo, es una etiqueta repartida por el mapa")
-    return ""
+    largo = float(gdf.geometry.length.sum())
+    razon = d / largo if largo > 0 else float("inf")
+    return d, largo, razon
 
 
-def separa_los_que_no_son_tramos(cfg, qn):
-    """Quita del registro los grupos de `tramnomb` que no son tramos.
+def aplica_exclusiones(cfg, qn):
+    """Quita los grupos de 'tramnomb' que la config excluye, por nombre exacto.
 
-    Devuelve (qn_limpio, [(nombre, razon)]). Se aplica ANTES de recortar a la
-    caja: una vez recortado, un grupo disperso parece local y ya no se puede
-    distinguir.
+    Por nombre exacto y a mano, no por una regla automatica: ver `dispersion`.
+    El registro usa este campo para dos cosas -- la mayoria de los valores son
+    tramos ("A - B"), pero tambien aparecen estados de trabajo del Ministerio
+    ("En proceso", "En Proceso") y el nombre vacio, que agrupados por nombre
+    dan "tramos" de mil kilometros de diagonal.
+
+    Devuelve (qn_limpio, [(nombre, razon)]).
     """
     if "tramnomb" not in qn.columns:
         return qn, []
 
-    nombres = qn["tramnomb"].fillna("(sin nombre)")
-    fuera = []
-    for nombre, sub in qn.groupby(nombres):
-        if str(nombre) in cfg.tramos_excluidos:
-            fuera.append((str(nombre), "excluido a mano en config.yaml "
-                                       "(datos.tramos_excluidos)"))
-            continue
-        razon = no_es_un_tramo(sub, cfg.diagonal_max_tramo)
-        if razon:
-            fuera.append((str(nombre), razon))
-
+    nombres = qn["tramnomb"].fillna("")
+    pedidos = set(cfg.tramos_excluidos)
+    fuera = sorted({str(n) for n in nombres.unique() if str(n) in pedidos})
     if not fuera:
         return qn, []
 
-    descartados = {n for n, _ in fuera}
-    print("\n  --- grupos de 'tramnomb' que NO son tramos ---")
-    for nombre, razon in fuera:
-        print(f"  '{nombre}': {razon}")
-    print("  Se quitan del registro. Si alguno te interesa, sacalo de")
-    print("  'datos.tramos_excluidos' o sube 'datos.diagonal_max_tramo'.")
-    return qn[~nombres.isin(descartados)].copy(), fuera
+    print("\n  --- grupos de 'tramnomb' excluidos por config.yaml ---")
+    for nombre in fuera:
+        sub = qn[nombres == nombre]
+        d, largo, razon = dispersion(sub)
+        etiqueta = nombre or "(nombre vacio)"
+        print(f"  '{etiqueta}': {len(sub)} rasgos, {largo / 1000:.1f} km de "
+              f"linea en una caja de {d / 1000:.0f} km de diagonal "
+              f"(razon {razon:.1f})")
+    print("  Se quitan del registro (datos.tramos_excluidos).")
+    return qn[~nombres.isin(fuera)].copy(), [(n, "excluido en config") for n in fuera]
+
+
+def avisa_si_parece_etiqueta(gdf, nombre, razon_max: float = 5.0) -> str:
+    """Aviso, sin excluir, cuando un grupo parece una etiqueta y no un tramo.
+
+    Se usa sobre las unidades que SI entran al analisis: si una de ellas
+    resulta ser un estado de trabajo con suficiente linea dentro de la caja,
+    hay que verlo antes de comparar sus pesos con los de un camino.
+    """
+    d, largo, razon = dispersion(gdf)
+    if razon <= razon_max:
+        return ""
+    return (f"'{nombre}' tiene {largo / 1000:.1f} km de linea repartidos en "
+            f"una caja de {d / 1000:.0f} km de diagonal (razon {razon:.1f}). "
+            "Eso parece una ETIQUETA del registro y no un tramo. Si lo es, "
+            "anadelo a 'datos.tramos_excluidos' en config.yaml.")
 
 
 def clasifica(nombre: str) -> str:

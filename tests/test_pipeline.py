@@ -318,3 +318,32 @@ def test_la_cli_rechaza_un_paso_que_no_existe():
     from camino import cli
     with pytest.raises(SystemExit):
         cli.main(["inventado"])
+
+
+def test_avisa_cuando_los_dos_modelos_son_el_mismo(corrido, capsys):
+    """Con 'componentes_ampliado: [fisico]' los dos modelos coinciden.
+
+    Es legitimo para probar la cadena sin archivo de sitios, pero entonces
+    `validar` imprimiria "no hay evidencia de que las componentes anadidas
+    aporten" -- cierto y enganoso a la vez, porque no se anadio ninguna.
+    """
+    import dataclasses
+    cfg = dataclasses.replace(corrido["cfg"],
+                              componentes_ampliado=("fisico",))
+    assert pipeline._modelos_iguales(cfg) is True
+    texto = capsys.readouterr().out
+    assert "son el mismo modelo" in texto
+
+    assert pipeline._modelos_iguales(corrido["cfg"]) is False
+
+
+def test_el_resumen_no_declara_falta_de_evidencia_si_no_hay_comparacion(capsys):
+    filas = [{"unidad": "u", "modelo": m, "bloque": 1, "D_retenido_m": 10.0}
+             for m in ("referencia", "ampliado")]
+    pipeline._resumen_validacion(filas, comparables=False)
+    texto = capsys.readouterr().out
+    assert "no hay comparacion" in texto
+    assert "NO hay evidencia" not in texto
+
+    pipeline._resumen_validacion(filas, comparables=True)
+    assert "el ampliado gana en" in capsys.readouterr().out

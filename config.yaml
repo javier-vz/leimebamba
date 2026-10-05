@@ -52,23 +52,28 @@ datos:
   # "Chillo - Chachapoyas": 23.0 km registrados, 12.4 km continuos.
   tramo: "Chillo - Chachapoyas"
 
-  # --- grupos de 'tramnomb' que NO son tramos ---
+  # --- grupos de 'tramnomb' que no son tramos ---
   # El registro usa el campo del nombre del tramo para dos cosas. La mayoria
-  # de los valores son tramos de verdad ("A - B"). Pero "En proceso" es un
-  # ESTADO DE TRABAJO del Ministerio, y aparece en rasgos repartidos por todo
-  # el pais: agrupado por nombre, su caja envolvente va de Ayacucho a
-  # Amazonas, 551 x 924 km de diagonal.
+  # de los valores son tramos ("A - B"), pero tambien hay estados de trabajo
+  # del Ministerio y rasgos sin nombre, que agrupados dan "tramos" de mil
+  # kilometros de diagonal.
   #
-  # El programa los detecta por la diagonal y los quita ANTES de recortar a
-  # la caja (una vez recortado, un grupo disperso parece local). Esta lista
-  # es para quitar alguno a mano, por nombre exacto.
-  tramos_excluidos: []
-
-  # Diagonal maxima, en metros, de la caja envolvente de un tramo. El tramo
-  # con nombre mas largo que aparece por aqui es Chachapoyas - Jumbilla, con
-  # 61 km completos; 150 km deja aire de sobra y descarta los mil kilometros
-  # de "En proceso". Pon un numero enorme para desactivar la deteccion.
-  diagonal_max_tramo: 150000
+  # Se excluyen A MANO, por nombre exacto, y no con una regla automatica.
+  # Hubo una regla automatica (descartar por diagonal mayor que 150 km) y
+  # estaba mal: descarto como "no son tramos" a Xauxa - Pachacamac, La Raya -
+  # Desaguadero, Pumpu - Pallasca y Acostambo - Huamachuco, que son secciones
+  # reales del Qhapaq Nan de entre 163 y 588 km, varias inscritas en la
+  # UNESCO. El registro es nacional y hay tramos con nombre de cientos de
+  # kilometros: ninguna regla geometrica los separa de una etiqueta con
+  # garantias. El programa MIDE la dispersion y AVISA; la decision es
+  # arqueologica y queda escrita aqui.
+  #
+  # El KMZ de GEO GPS PERU trae estos tres, con el nombre repetido en dos
+  # grafias distintas:
+  tramos_excluidos:
+    - ""                 # rasgos sin nombre de tramo
+    - "En proceso"
+    - "En Proceso"
 
   # --- alternativa, solo si el WFS no responde ---
   # Capa de ArcGIS REST, sin el /query final. README, paso 3, opcion C.

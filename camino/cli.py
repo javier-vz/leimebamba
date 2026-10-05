@@ -9,7 +9,7 @@ import argparse
 import sys
 import time
 
-from . import buscar, caja, config, pipeline, ruta as _ruta
+from . import FECHA, __version__, buscar, caja, config, pipeline, ruta as _ruta
 
 PASOS = {
     "bajar": (pipeline.bajar, "DEM (dos fuentes) y cuerpos de agua"),
@@ -72,6 +72,14 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     cfg = config.Config.cargar(args.config)
+
+    # El encabezado existe por una razon practica: cuando se pega la salida
+    # de una corrida para comentarla, hay que poder saber QUE version la
+    # produjo y DESDE QUE carpeta. Dos veces se discutieron numeros de una
+    # version vieja sin darnos cuenta, y una de ellas fue porque el zip
+    # traia otro nombre de carpeta y se descomprimio al lado.
+    print(f"camino {__version__} ({FECHA})")
+    print(f"proyecto: {cfg.raiz}")
 
     if args.paso in AYUDAS:
         fn, texto = AYUDAS[args.paso]

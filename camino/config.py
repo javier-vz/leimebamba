@@ -39,7 +39,6 @@ class Config:
     capas_camino: tuple      # capas concretas, si se quieren fijar
     tramo: str               # tramo del registro a estudiar
     tramos_excluidos: tuple  # grupos de 'tramnomb' que no son tramos
-    diagonal_max_tramo: float  # m; mas que esto no es un tramo
 
     # modelo de costo: dos modelos con las mismas restricciones
     g_max: float
@@ -100,9 +99,8 @@ class Config:
             capas_camino=tuple(d["datos"].get("capas_camino") or ()),
             tramo=str(d["datos"].get("tramo") or ""),
             tramos_excluidos=tuple(
-                str(x) for x in (d["datos"].get("tramos_excluidos") or ())),
-            diagonal_max_tramo=float(
-                d["datos"].get("diagonal_max_tramo", 150_000)),
+                "" if x is None else str(x)
+                for x in (d["datos"].get("tramos_excluidos") or ())),
             g_max=float(d["costo"]["g_max"]),
             epsilon=float(d["costo"]["epsilon"]),
             percentiles=tuple(float(v) for v in d["costo"]["percentiles"]),

@@ -431,6 +431,27 @@ def _contexto(cfg, g, t, geometria, puntos_sitios=None,
     return sub, o, d, obs, t6
 
 
+def _modelos_iguales(cfg) -> bool:
+    """True si los dos modelos son el mismo, y lo dice.
+
+    Pasa cuando se deja 'componentes_ampliado: [fisico]' para probar la
+    cadena sin archivo de sitios. Es legitimo, pero entonces comparar los
+    dos modelos no significa nada, y hay que decirlo: si no, `validar`
+    imprime "no hay evidencia de que las componentes anadidas aporten" --
+    que es cierto y enganoso a la vez, porque no se anadio ninguna.
+    """
+    iguales = set(cfg.componentes_referencia) == set(cfg.componentes_ampliado)
+    if iguales:
+        print("\n  OJO: los dos modelos tienen las MISMAS componentes "
+              f"({list(cfg.componentes_referencia)}),")
+        print("  asi que son el mismo modelo y compararlos no dice nada. Esto")
+        print("  sirve para probar la cadena, no para responder la pregunta.")
+        print("  Para el modelo ampliado de verdad, anade 'ceremonial' (y si")
+        print("  quieres 'visibilidad') a costo.componentes_ampliado y deja un")
+        print("  archivo de sitios en datos/.")
+    return iguales
+
+
 def red_del_modelo(cfg, nombres, componentes):
     """Red del simplex de un modelo, expandida a las K columnas del grafo.
 
@@ -533,6 +554,7 @@ def barrer(cfg):
     from shapely.geometry import LineString
 
     g, t, uds = _carga_unidades(cfg)
+    _modelos_iguales(cfg)
     puntos, nombres_sitios = sitios.carga(cfg)
     if len(puntos):
         print(f"  sitios ceremoniales: {len(puntos)}")
@@ -624,6 +646,7 @@ def validar(cfg, n_bloques: int | None = None):
     from shapely.ops import substring
 
     n_bloques = cfg.n_bloques if n_bloques is None else n_bloques
+    iguales = _modelos_iguales(cfg)
     g, t, uds = _carga_unidades(cfg)
     puntos, _ = sitios.carga(cfg)
     redes = {m: red_del_modelo(cfg, g.nombres, comps)
@@ -678,11 +701,11 @@ def validar(cfg, n_bloques: int | None = None):
         raise SystemExit("ninguna unidad dio para validar en bloques")
 
     _guarda_json(cfg, "validacion_bloqueada.json", filas)
-    _resumen_validacion(filas)
+    _resumen_validacion(filas, comparables=not iguales)
     return filas
 
 
-def _resumen_validacion(filas) -> dict:
+def _resumen_validacion(filas, comparables: bool = True) -> dict:
     """Compara los modelos SOBRE LOS BLOQUES RETENIDOS, que es lo que vale."""
     print("\n  --- sobre los bloques retenidos (sin recalibrar) ---")
     por_modelo = {}
@@ -692,6 +715,12 @@ def _resumen_validacion(filas) -> dict:
         a = np.array(ds, dtype=float)
         print(f"  {modelo:12s} mediana {np.median(a):7.1f} m   "
               f"media {a.mean():7.1f} m   n = {len(a)}")
+
+    if not comparables:
+        print("\n  Los dos modelos son el mismo, asi que no hay comparacion")
+        print("  que hacer. Las dos filas de arriba tienen que coincidir; si")
+        print("  no coinciden, hay un bug.")
+        return por_modelo
 
     if {"referencia", "ampliado"} <= set(por_modelo):
         pares = {}

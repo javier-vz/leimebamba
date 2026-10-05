@@ -99,6 +99,32 @@ def baja(url: str, destino: pathlib.Path, params=None, forzar: bool = False,
 
 # ------------------------------------------------------------------ pasos
 
+def cubre_la_caja(ruta, bbox, margen_grados: float = 0.005) -> bool:
+    """True si un raster ya bajado cubre la caja que pide la config.
+
+    Hace falta por una trampa silenciosa: si se ensancha
+    'extension.bbox' y se corre `bajar` sin --forzar, el archivo viejo ya
+    existe y se da por bueno. Despues `preparar` lo alinea a la rejilla
+    NUEVA y el pedazo que falta queda como nodata -- o sea, un agujero en
+    el DEM justo en la parte que se acaba de anadir. Nada falla; el estudio
+    simplemente se corre sobre un DEM incompleto.
+    """
+    import rasterio
+    from rasterio.warp import transform_bounds
+
+    ruta = pathlib.Path(ruta)
+    if not ruta.exists() or ruta.stat().st_size == 0:
+        return False
+    try:
+        with rasterio.open(ruta) as src:
+            o, s, e, n = transform_bounds(src.crs, "EPSG:4326", *src.bounds,
+                                          densify_pts=21)
+    except Exception:
+        return False
+    return (o <= bbox[0] + margen_grados and s <= bbox[1] + margen_grados
+            and e >= bbox[2] - margen_grados and n >= bbox[3] - margen_grados)
+
+
 def dems(cfg, forzar: bool = False) -> dict[str, pathlib.Path]:
     """Baja los dos DEM recortados. Devuelve {nombre: ruta}.
 
@@ -108,9 +134,17 @@ def dems(cfg, forzar: bool = False) -> dict[str, pathlib.Path]:
     llave = cfg.exige_llave()
     salida = {}
     for dem in DEMS:
+        destino = cfg.dir_datos / f"{dem.lower()}_raw.tif"
+        rehacer = forzar
+        if not forzar and destino.exists() and \
+                not cubre_la_caja(destino, cfg.bbox):
+            print(f"  {destino.name} es de una caja MAS CHICA que la de "
+                  "config.yaml:")
+            print("  lo vuelvo a bajar. (Si no, 'preparar' lo alinearia a la")
+            print("  rejilla nueva y el pedazo que falta quedaria como hueco.)")
+            rehacer = True
         url, params = url_opentopography(cfg.bbox, dem, llave)
-        salida[dem] = baja(url, cfg.dir_datos / f"{dem.lower()}_raw.tif",
-                           params=params, forzar=forzar)
+        salida[dem] = baja(url, destino, params=params, forzar=rehacer)
     return salida
 
 

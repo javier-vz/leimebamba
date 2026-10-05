@@ -381,3 +381,30 @@ def test_el_aviso_nombra_las_unidades_cortadas(cfg, capsys):
     tocadas = preparar.avisa_recortadas(cfg, [("La Jalca - Mendoza", borde)])
     assert tocadas == ["La Jalca - Mendoza"]
     assert "borde de la caja" in capsys.readouterr().out
+
+
+def test_un_dem_de_una_caja_mas_chica_se_detecta(tmp_path):
+    """La trampa silenciosa: ensanchar el bbox y no volver a bajar el DEM.
+
+    `bajar` sin --forzar da por bueno el archivo viejo, `preparar` lo alinea
+    a la rejilla nueva y el pedazo que falta queda como hueco. Nada falla y
+    el estudio corre sobre un DEM incompleto.
+    """
+    from rasterio.transform import from_origin
+    from rasterio.warp import transform_bounds
+
+    chica = (-77.90, -6.42, -77.87, -6.39)
+    grande = (-78.05, -6.80, -77.70, -6.15)
+
+    ruta = tmp_path / "cop30_raw.tif"
+    # un raster que cubre 'chica' de verdad
+    xmin, ymin, xmax, ymax = transform_bounds("EPSG:4326", "EPSG:32718",
+                                              *chica, densify_pts=21)
+    alto = int((ymax - ymin) / 30) + 2
+    ancho = int((xmax - xmin) / 30) + 2
+    preparar.escribe(ruta, np.zeros((alto, ancho), dtype=np.float32),
+                     from_origin(xmin, ymax, 30.0, 30.0), "EPSG:32718")
+
+    assert descarga.cubre_la_caja(ruta, chica) is True
+    assert descarga.cubre_la_caja(ruta, grande) is False
+    assert descarga.cubre_la_caja(tmp_path / "no_existe.tif", chica) is False

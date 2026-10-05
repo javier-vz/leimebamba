@@ -145,47 +145,99 @@ def _con_en_proceso(tmp_path, nombre="En proceso"):
     return cfg
 
 
-def test_un_grupo_repartido_por_el_pais_no_cuenta_como_tramo(tmp_path, capsys):
+def test_un_grupo_disperso_ya_no_arrastra_la_caja(tmp_path, capsys):
+    """El arreglo de fondo: se mide la pieza que TOCA la caja.
+
+    Antes se tomaba la pieza continua mayor del grupo entero, que para una
+    etiqueta esta en otro departamento, y la caja propuesta se iba al otro
+    lado del pais: 'En proceso' pedia 582 M de celdas.
+    """
     cfg = _con_en_proceso(tmp_path)
     salida = caja.informe(cfg)
 
-    assert "En proceso" not in {t["tramo"] for t in salida["tramos"]}
-    texto = capsys.readouterr().out
-    assert "no es un tramo" in texto
-    assert "km de diagonal" in texto
-
+    # el grupo sigue estando (no se excluye por una regla automatica)
+    assert "En proceso" in {t["tramo"] for t in salida["tramos"]}
+    # pero lo que se mide de el es la pieza de dentro de la caja
+    fila = next(t for t in salida["tramos"] if t["tramo"] == "En proceso")
+    assert fila["continuo_completo_km"] < 2.0
     # y la caja propuesta no se va a Ayacucho
     if "caja_para_todos" in salida:
         assert salida["caja_para_todos"][1] > -7.0
 
+    # y avisa de que parece una etiqueta
+    assert "parece una ETIQUETA" in capsys.readouterr().out
+
+
+def test_no_descarta_un_tramo_real_aunque_sea_larguisimo(tmp_path, capsys):
+    """Regresion del error que Javier caza en la corrida del 5-oct.
+
+    Una regla automatica descartaba por diagonal > 150 km y dijo que Xauxa -
+    Pachacamac (163 km), La Raya - Desaguadero (293), Pumpu - Pallasca (338)
+    y Acostambo - Huamachuco (588) "no son tramos". Son secciones reales del
+    Qhapaq Nan, varias inscritas en la UNESCO.
+    """
+    import geopandas as gpd
+    import numpy as np
+    from shapely.geometry import LineString
+
+    with open(tmp_path / "config.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(CONFIG, f)
+    cfg = config.Config.cargar(tmp_path / "config.yaml")
+
+    # un tramo real, continuo, que entra en la caja y sigue 500 km al sur
+    n = 400
+    larguisimo = LineString(np.column_stack([
+        np.linspace(-77.89, -77.50, n), np.linspace(-6.40, -10.90, n)]))
+    gpd.GeoDataFrame({"tramnomb": ["Acostambo - Huamachuco"]},
+                     geometry=[larguisimo], crs="EPSG:4326").to_crs(cfg.crs) \
+        .to_file(cfg.dir_datos / "registro.gpkg", layer="camino", driver="GPKG")
+
+    salida = caja.informe(cfg)
+    nombres = {t["tramo"] for t in salida["tramos"]}
+    assert "Acostambo - Huamachuco" in nombres
+    texto = capsys.readouterr().out
+    assert "no es un tramo" not in texto
+    # es continuo, asi que tampoco dispara el aviso de etiqueta
+    assert "parece una ETIQUETA" not in texto
+
 
 def test_se_puede_excluir_un_tramo_a_mano(tmp_path, capsys):
     import dataclasses
-    cfg = _con_en_proceso(tmp_path, nombre="Pauja - Santa Cruz")
-    # con un nombre normal, la diagonal lo delata igual
-    caja.informe(cfg)
-    assert "no es un tramo" in capsys.readouterr().out
-
-    # y con la deteccion apagada, la lista a mano sigue sirviendo
-    sin_deteccion = dataclasses.replace(
-        cfg, diagonal_max_tramo=1e12,
-        tramos_excluidos=("Pauja - Santa Cruz",))
-    salida = caja.informe(sin_deteccion)
-    assert "Pauja - Santa Cruz" not in {t["tramo"] for t in salida["tramos"]}
-    assert "excluido a mano" in capsys.readouterr().out
+    cfg = _con_en_proceso(tmp_path)
+    excluido = dataclasses.replace(cfg, tramos_excluidos=("En proceso",))
+    salida = caja.informe(excluido)
+    assert "En proceso" not in {t["tramo"] for t in salida["tramos"]}
+    assert "excluidos por config.yaml" in capsys.readouterr().out
 
 
-def test_sin_la_deteccion_el_grupo_disperso_arrastra_la_caja(tmp_path):
-    """La prueba de que el problema era real: con la deteccion apagada, la
-    caja propuesta se va a cientos de millones de celdas."""
-    import dataclasses
-    cfg = dataclasses.replace(_con_en_proceso(tmp_path),
-                              diagonal_max_tramo=1e12,
-                              largo_min_unidad=100.0)
-    salida = caja.informe(cfg)
-    a, al = salida["celdas_para_todos"]
-    assert a * al > 100e6
-    assert salida["caja_para_todos"][1] < -13.0      # llega a Ayacucho
+def test_la_dispersion_separa_una_etiqueta_de_un_camino():
+    """La medida que informa: razon diagonal/largo.
+
+    Un camino es al menos tan largo como la recta entre sus extremos, asi
+    que su razon ronda 1. Una etiqueta repartida por el mapa tiene mucha
+    diagonal y poca linea.
+    """
+    import geopandas as gpd
+    import numpy as np
+    from shapely.geometry import LineString
+    from camino import registro
+
+    n = 200
+    camino = gpd.GeoDataFrame(geometry=[LineString(np.column_stack([
+        np.linspace(0, 0, n), np.linspace(0, 500_000, n)]))], crs="EPSG:32718")
+    _, _, razon_camino = registro.dispersion(camino)
+    assert razon_camino < 1.1
+
+    etiqueta = gpd.GeoDataFrame(geometry=[
+        LineString([(0, 0), (0, 1000)]),
+        LineString([(500_000, 900_000), (500_000, 901_000)])],
+        crs="EPSG:32718")
+    _, _, razon_etiqueta = registro.dispersion(etiqueta)
+    assert razon_etiqueta > 100
+
+    assert registro.avisa_si_parece_etiqueta(camino, "real") == ""
+    assert "parece una ETIQUETA" in registro.avisa_si_parece_etiqueta(
+        etiqueta, "En proceso")
 
 
 def test_el_acumulado_crece_y_cuenta_las_unidades(proyecto):

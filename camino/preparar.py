@@ -189,7 +189,9 @@ def unidades(cfg, camino):
             "trazas de OSM no los traen).\nPon 'unidad: sector' en "
             "config.yaml, o usa el KMZ del registro.")
 
-    salida = []
+    from . import registro
+
+    salida, avisos = [], []
     for nombre, g in camino.groupby(camino["tramnomb"].fillna("(sin nombre)")):
         try:
             piezas = lineas_unidas(g)
@@ -198,12 +200,25 @@ def unidades(cfg, camino):
         mayor = piezas[0]
         if mayor.length >= cfg.largo_min_unidad:
             salida.append((str(nombre), mayor))
+            # Una etiqueta del registro con suficiente linea dentro de la
+            # caja entraria al analisis como si fuera un camino, y sus pesos
+            # se compararian con los de un camino. Aqui no se excluye nada
+            # -- el criterio es arqueologico-- pero se dice.
+            aviso = registro.avisa_si_parece_etiqueta(g, str(nombre))
+            if aviso:
+                avisos.append(aviso)
 
     if not salida:
         raise SystemExit(
             f"Ningun tramo llega a {cfg.largo_min_unidad / 1000:.1f} km "
             "continuos.\nBaja 'largo_min_unidad' en config.yaml, o usa "
             "'unidad: sector'.")
+    if avisos:
+        print("\n  AVISO: estas unidades parecen ETIQUETAS del registro y no "
+              "tramos:")
+        for a in avisos:
+            print(f"    {a}")
+
     salida = sorted(salida, key=lambda u: -u[1].length)
     avisa_recortadas(cfg, salida)
     return salida

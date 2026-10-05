@@ -30,4 +30,5 @@ Modulos, en el orden en que se usan:
     figuras        las dos figuras del articulo
 """
 
-__version__ = "0.1.0"
+__version__ = "0.6.0"
+FECHA = "2026-10-05"
