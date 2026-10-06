@@ -1,6 +1,6 @@
 # Resultados Leimebamba–Chachapoyas
 
-Oct 6, 2026 · @javier
+Javier Vera Zúñiga · 6 de octubre de 2026
 
 En cinco de los seis tramos del Qhapaq Ñan que analizamos en Amazonas, el camino registrado resulta **más barato de caminar que cualquiera de las 500 rutas alternativas** que generamos sobre el mismo terreno. En el sexto, Pauja – Santa Cruz, no: ahí el camino real es más caro que el 73% de las alternativas, y da una vuelta que el terreno no explica. Ése es el tramo que conviene mirar en campo.
 
@@ -18,10 +18,10 @@ El método responde tres preguntas, y cada una corrige un problema de la anterio
 
 El costo de cruzar de una celda a su vecina es una suma ponderada:
 
-```latex
+$$
 c_{ij} = L_{ij} \sum_{k=1}^{K} w_k \, \varphi_k(i,j),
 \qquad \sum_{k=1}^{K} w_k = 1, \quad w_k \ge 0
-```
+$$
 
 Los **pesos** `w` son lo único que se estima, y no se fijan a mano: se buscan los que hacen que el camino de mínimo costo se parezca más al trazado registrado. Que sumen 1 es lo que los hace comparables entre tramos: sin esa restricción, `w` y `2w` dan exactamente el mismo camino, el óptimo no es único, y la frase «en este tramo manda la pendiente» no quiere decir nada.
 
@@ -53,13 +53,32 @@ Un defecto parecido, que vale anotar aunque no afecte a esta zona: `Huarautambo 
 
 Quedaron **seis tramos con al menos 8 km continuos**, 169 km en total. Para que entraran completos hubo que ensanchar la caja de estudio hasta 6.4 millones de celdas: con la caja mínima sólo Chillo – Chachapoyas entraba entero, y con una sola unidad completa no hay nada que comparar entre tramos.
 
-## El resultado en una figura
+## El resultado
 
-&#91;embedded content: Seis tramos del registro, 500 rutas de control por tramo · corrida del 5 de octubre de 2026\]
+Cada número es lo que cuesta recorrer una ruta dividido por lo que cuesta el
+óptimo del modelo. 1.00 sería el óptimo mismo.
 
-En los cinco primeros tramos el punto azul cae a la izquierda del bigote: el camino registrado cuesta menos que el cuarto más barato de las 500 rutas de control. Ninguna de las 500 lo igualó, así que el valor *p* está en su piso, 0.002. En Pauja – Santa Cruz el punto cae **dentro** de la banda y por encima de su mediana.
+| Tramo | Camino registrado | Rutas de control (p25 / mediana / p75) | *p* |
+| --- | --- | --- | --- |
+| Chillo – Chachapoyas | **1.03** | 1.68 / 2.00 / 2.57 | 0.002 |
+| La Jalca – Mendoza | **1.11** | 1.55 / 1.71 / 1.88 | 0.002 |
+| Leymebamba – Chilchos – Mendoza | **1.16** | 1.62 / 1.78 / 1.98 | 0.002 |
+| Chachapoyas – Cochamal | **1.17** | 1.78 / 2.10 / 2.45 | 0.002 |
+| Chachapoyas – Jumbilla | **1.25** | 1.79 / 1.95 / 2.15 | 0.002 |
+| Pauja – Santa Cruz | **1.45** | 1.22 / 1.30 / 1.47 | 0.729 |
 
-Lo que la figura muestra y la separación en metros esconde: Leymebamba – Chilchos y Chachapoyas – Jumbilla están a más de 1 500 m del trazado modelado, y sin embargo su camino es barato. En esos valles hay muchas rutas que cuestan parecido, así que el terreno restringe el **costo** del camino sin fijar su **posición**. Eso es equifinalidad espacial, y con la distancia sola parecía un fracaso del modelo.
+En los cinco primeros tramos el camino registrado cuesta menos que el cuarto
+más barato de las 500 rutas de control: su valor cae por debajo del p25 de la
+banda. Ninguna de las 500 lo igualó, así que *p* está en su piso, $1/(M+1)$
+con $M = 500$. En Pauja – Santa Cruz el valor cae **dentro** de la banda y por
+encima de su mediana.
+
+Lo que estos números muestran y la separación en metros esconde: Leymebamba –
+Chilchos y Chachapoyas – Jumbilla están a más de 1 500 m del trazado modelado,
+y sin embargo su camino es barato. En esos valles hay muchas rutas que cuestan
+parecido, así que el terreno restringe el **costo** del camino sin fijar su
+**posición**. Eso es equifinalidad espacial, y con la distancia sola parecía un
+fracaso del modelo.
 
 ## Los seis tramos, uno por uno
 
@@ -112,7 +131,7 @@ Vienen del diseño del proyecto, no son técnicas, y cambian el resultado.
 1. **Un sitio que se reconoció *por* el camino no puede explicar el camino.** Si la identificación de un lugar dependió principalmente de estar junto a la vía, usarlo como predictor es circular. Esto el programa **no lo puede decidir**: es criterio arqueológico y se filtra al armar el archivo. Es la decisión más importante de todo este paso.
 2. **Un sitio en el extremo del tramo analizado se excluye de su componente.** Si no, el modelo recibe como premio acercarse a un punto al que de todas formas tiene que llegar, y la componente mide el enunciado del problema en vez del paisaje. Esta sí la hace el programa, tramo por tramo, y dice en pantalla cuántos sitios quitó.
 
-Con el archivo puesto, quedan tres pasos: el barrido de pesos (unos 6 minutos), la validación bloqueada (\~20 minutos) y las figuras. La validación es la que decide: estima los pesos dejando fuera un pedazo del trazado y los mide **sobre ese pedazo**, sin recalibrar. El modelo ampliado tiene más parámetros, así que ajusta mejor por construcción sobre los datos con que se estimó; si no gana también en los bloques retenidos, la mejora era capacidad de ajuste y no información espacial.
+Con el archivo puesto, quedan tres pasos: el barrido de pesos (unos 6 minutos), la validación bloqueada (unos 20 minutos) y las figuras. La validación es la que decide: estima los pesos dejando fuera un pedazo del trazado y los mide **sobre ese pedazo**, sin recalibrar. El modelo ampliado tiene más parámetros, así que ajusta mejor por construcción sobre los datos con que se estimó; si no gana también en los bloques retenidos, la mejora era capacidad de ajuste y no información espacial.
 
 Y eso también es un resultado publicable. El diseño permite que la respuesta sea «el espacio ceremonial no añade nada», y tiene que permitirlo: si ningún resultado posible refutara la hipótesis, no se estaría probando nada.
 
