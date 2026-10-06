@@ -8,7 +8,7 @@
 
 # La version del paquete con la que se escribio este archivo. Si no coincide
 # con la del programa, se avisa: puede que haya parametros nuevos.
-version: "0.13.0"
+version: "0.15.0"
 
 extension:
   # LA CAJA DEL ESTUDIO, decidida con `python -m camino caja` el 5-oct-2026.

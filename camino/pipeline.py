@@ -301,6 +301,12 @@ def revisar_grafo(cfg):
             "razon_de_costo": (round(costo_obs / costo_opt, 3)
                                if costo_opt > 0 and np.isfinite(costo_obs)
                                else None),
+            # Es un camino, o dos ramas cosidas? Una sinuosidad alta no lo
+            # dice: un rodeo y una horquilla dan la misma.
+            "autoproximidad_m": round(
+                metricas.autoproximidad(obs, 1000.0), 1),
+            "giro_maximo_grados": round(metricas.giro_maximo(
+                np.asarray(linea.coords, dtype=np.float64)[:, :2]), 1),
             "franja_celdas": celdas,
             "toca_borde_de_la_vecindad": bool(
                 metricas.toca_borde(sub.filcol[cam], vecindad)),
@@ -364,6 +370,24 @@ def _tabla_revision(filas) -> None:
         print("     el buffer el que esta decidiendo, no el terreno. Sube")
         print("     'dominio.buffer_corredor' y vuelve a correr desde aqui.")
 
+    print(f"\n  --- es UN camino, o dos ramas cosidas? ---")
+    print(f"  {'unidad':31s} {'autoprox':>9s} {'giro max':>9s}")
+    for f in filas:
+        prox = f["autoproximidad_m"]
+        print(f"  {f['unidad'][:31]:31s} "
+              f"{'   > 1 km' if prox > 1000 else f'{prox:8.0f} m'} "
+              f"{f['giro_maximo_grados']:8.0f} g")
+    print("  autoprox  lo mas cerca que pasa la linea de SI MISMA, entre")
+    print("            puntos separados por mas de 1 km de recorrido. Un")
+    print("            rodeo real se aleja de si mismo (cientos de metros o")
+    print("            mas); una horquilla cosida por `linemerge` vuelve")
+    print("            sobre si misma y baja a decenas de metros.")
+    print("  giro max  el giro mas brusco entre segmentos. Ni una herradura")
+    print("            pasa de 150 grados: mas que eso es una inversion, o")
+    print("            sea donde se unieron dos cosas distintas.")
+
+    _avisa_de_la_geometria(filas)
+
     completas = [f for f in filas if not f["recortada_por_la_caja"]
                  and not f["toca_borde_de_la_vecindad"]]
     if completas:
@@ -375,6 +399,45 @@ def _tabla_revision(filas) -> None:
         print("\n  NINGUNA unidad esta limpia: todas estan recortadas por la")
         print("  caja o pegadas al borde de su vecindad. Arregla eso antes")
         print("  de interpretar pesos.")
+
+
+def _avisa_de_la_geometria(filas, cerca_m: float = 150.0,
+                           giro_max: float = 150.0) -> list[str]:
+    """Senala las unidades cuyo trazado puede no ser UN camino.
+
+    `preparar.unidades` toma la pieza continua mayor que devuelve
+    `linemerge`, y linemerge cose por vertices compartidos. Si un tramo del
+    registro tiene una horquilla, la "pieza mayor" puede ser una rama que
+    sube y otra que baja unidas por un vertice: los dos extremos de la
+    unidad serian los dos cabos de una Y, y ajustar un modelo de costo
+    contra eso no significa nada.
+
+    No se excluye nada: se dice, y se mira en QGIS. Puede ser un rodeo real,
+    que es un hallazgo, o una union espuria, que es un problema del dato.
+    """
+    avisos = []
+    for f in filas:
+        motivos = []
+        if f["autoproximidad_m"] < cerca_m:
+            motivos.append(
+                f"pasa a {f['autoproximidad_m']:.0f} m de si misma entre "
+                "puntos separados por mas de 1 km de recorrido")
+        if f["giro_maximo_grados"] > giro_max:
+            motivos.append(
+                f"tiene un giro de {f['giro_maximo_grados']:.0f} grados, o "
+                "sea una inversion")
+        if motivos:
+            avisos.append(f"{f['unidad']}: " + "; ".join(motivos))
+
+    if avisos:
+        print("\n  AVISO DE GEOMETRIA -- puede que esto no sea UN camino:")
+        for a in avisos:
+            print(f"    {a}")
+        print("    `linemerge` cose por vertices compartidos, asi que la")
+        print("    pieza mayor de un tramo con horquilla puede ser una rama")
+        print("    de ida y otra de vuelta. Miralo en QGIS antes de creerte")
+        print("    su sinuosidad o su razon de costo.")
+    return avisos
 
 
 def _explica_corte(cfg, sub, costos, o, d, nombre) -> None:
@@ -465,6 +528,36 @@ def _contexto(cfg, g, t, geometria, puntos_sitios=None,
     d = sub.nodo_mas_cercano(*fc[1])
     obs = preparar.vertices(geometria, paso=cfg.resolucion)
     return sub, o, d, obs, t6
+
+
+def _exige_sitios_o_explica(cfg) -> None:
+    """Para ANTES del bucle si falta el archivo de sitios.
+
+    Antes reventaba dentro de la primera unidad, despues de haber cargado el
+    grafo y empezado a trabajar. El error era el mismo pero llegaba tarde.
+
+    Y dice lo que de verdad conviene hacer, que no es poner
+    'componentes_ampliado: [fisico]': con una sola componente el simplex es
+    un punto, el barrido es un unico Dijkstra, y ese numero ya lo imprimio
+    `revisar` en la columna D. No aporta nada.
+    """
+    de_sitios = [c for c in cfg.componentes_ampliado
+                 if c in ("ceremonial", "visibilidad")]
+    if not de_sitios:
+        return
+    raise SystemExit(
+        f"\nEl modelo ampliado incluye {de_sitios} y no hay archivo de "
+        "sitios.\n"
+        "\nDeja en datos/ un archivo que empiece por 'sitios' (.gpkg, .shp,\n"
+        ".geojson, .kmz o .csv con columnas lon/lat). Con eso corre.\n"
+        "\nLo que NO conviene es quitar las componentes para que pase:\n"
+        "con una sola componente el simplex es un punto, el barrido es un\n"
+        "unico Dijkstra, y ese numero ya esta en la columna D de `revisar`.\n"
+        "El barrido sin sitios no aporta nada que no tengas.\n"
+        "\nLo que ya tienes cerrado SIN los sitios: la tabla de `revisar` y\n"
+        "el nulo de costo de `nulos`. Eso es un resultado completo sobre el\n"
+        "costo fisico. Lo que falta es la pregunta del espacio ceremonial,\n"
+        "y esa necesita el catalogo.")
 
 
 def _modelos_iguales(cfg) -> bool:
@@ -679,6 +772,8 @@ def barrer(cfg):
     puntos, nombres_sitios = sitios.carga(cfg)
     if len(puntos):
         print(f"  sitios ceremoniales: {len(puntos)}")
+    else:
+        _exige_sitios_o_explica(cfg)
 
     redes = {m: red_del_modelo(cfg, g.nombres, comps)
              for m, comps in cfg.modelos.items()}

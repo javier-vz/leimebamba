@@ -11,6 +11,8 @@
     "distancia_media_m": 1566.3,
     "frechet_m": 5388.1,
     "razon_de_costo": 1.254,
+    "autoproximidad_m": 618.9,
+    "giro_maximo_grados": 70.6,
     "franja_celdas": 2,
     "toca_borde_de_la_vecindad": false
   },
@@ -26,6 +28,8 @@
     "distancia_media_m": 1523.7,
     "frechet_m": 4332.6,
     "razon_de_costo": 1.162,
+    "autoproximidad_m": 858.9,
+    "giro_maximo_grados": 45.8,
     "franja_celdas": 2,
     "toca_borde_de_la_vecindad": false
   },
@@ -41,6 +45,8 @@
     "distancia_media_m": 335.9,
     "frechet_m": 1563.6,
     "razon_de_costo": 1.114,
+    "autoproximidad_m": 776.7,
+    "giro_maximo_grados": 89.0,
     "franja_celdas": 2,
     "toca_borde_de_la_vecindad": false
   },
@@ -56,6 +62,8 @@
     "distancia_media_m": 1909.4,
     "frechet_m": 3807.9,
     "razon_de_costo": 1.446,
+    "autoproximidad_m": 361.8,
+    "giro_maximo_grados": 134.7,
     "franja_celdas": 2,
     "toca_borde_de_la_vecindad": false
   },
@@ -71,6 +79,8 @@
     "distancia_media_m": 554.5,
     "frechet_m": 2248.8,
     "razon_de_costo": 1.165,
+    "autoproximidad_m": 700.1,
+    "giro_maximo_grados": 54.4,
     "franja_celdas": 2,
     "toca_borde_de_la_vecindad": false
   },
@@ -86,6 +96,8 @@
     "distancia_media_m": 154.7,
     "frechet_m": 514.6,
     "razon_de_costo": 1.032,
+    "autoproximidad_m": 729.5,
+    "giro_maximo_grados": 130.2,
     "franja_celdas": 2,
     "toca_borde_de_la_vecindad": false
   }

@@ -134,3 +134,63 @@ def sinuosidad(largo, extremos_xy) -> float:
     if recta <= 0:
         return float("inf")
     return float(largo) / recta
+
+
+def autoproximidad(xy, separacion_minima: float = 1000.0) -> float:
+    """Distancia minima entre dos puntos de la MISMA linea que esten lejos
+    ENTRE SI a lo largo de ella.
+
+    Distingue dos cosas que dan la misma sinuosidad y significan lo
+    contrario:
+
+      - un camino que RODEA algo (un cerro, una quebrada) es un arco suave:
+        se aleja de si mismo, y su autoproximidad es del orden del diametro
+        del rodeo, cientos o miles de metros.
+
+      - una pieza que `linemerge` COSIO de dos ramas distintas con un
+        vertice comun vuelve sobre si misma: su autoproximidad baja a
+        decenas de metros, porque la linea pasa dos veces casi por el mismo
+        sitio.
+
+    Lo segundo no es un camino y no se puede ajustar un modelo de costo
+    contra el: los extremos de la "unidad" serian los dos cabos de una Y.
+    """
+    import numpy as np
+
+    xy = np.asarray(xy, dtype=np.float64)
+    if len(xy) < 3:
+        return float("inf")
+
+    paso = np.r_[0.0, np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]
+    lejos = np.abs(paso[:, None] - paso[None, :]) >= separacion_minima
+    if not lejos.any():
+        return float("inf")
+
+    d = np.hypot(xy[:, 0, None] - xy[None, :, 0],
+                 xy[:, 1, None] - xy[None, :, 1])
+    return float(d[lejos].min())
+
+
+def giro_maximo(xy) -> float:
+    """Angulo de giro maximo entre segmentos consecutivos, en grados.
+
+    Se mide sobre los vertices ORIGINALES, no sobre un remuestreo: un
+    remuestreo suaviza justo lo que se busca. Un vertice donde la linea se
+    invierte casi 180 grados no es una curva de camino -- ni una herradura
+    lo hace-- es donde se unieron dos cosas distintas.
+    """
+    import numpy as np
+
+    xy = np.asarray(xy, dtype=np.float64)
+    if len(xy) < 3:
+        return 0.0
+
+    v = np.diff(xy, axis=0)
+    n = np.hypot(*v.T)
+    bueno = n > 0
+    v, n = v[bueno], n[bueno]
+    if len(v) < 2:
+        return 0.0
+
+    cos = ((v[:-1] * v[1:]).sum(axis=1) / (n[:-1] * n[1:])).clip(-1.0, 1.0)
+    return float(np.degrees(np.arccos(cos)).max())
