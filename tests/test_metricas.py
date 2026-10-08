@@ -99,3 +99,45 @@ def test_sinuosidad_es_uno_en_una_recta_y_crece_con_el_rodeo():
 
     # extremos coincidentes: no esta definida
     assert metricas.sinuosidad(500.0, [(0, 0), (0, 0)]) == float("inf")
+
+
+def test_autoproximidad_separa_un_rodeo_de_una_horquilla():
+    """La medida que distingue "el camino rodea un cerro" de "linemerge
+    cosio dos ramas": las dos dan la misma sinuosidad."""
+    import numpy as np
+
+    # un rodeo: medio circulo de 2 km de radio. Se aleja de si mismo.
+    th = np.linspace(0, np.pi, 120)
+    rodeo = np.column_stack([2000 * np.cos(th), 2000 * np.sin(th)])
+    assert metricas.autoproximidad(rodeo, 1000.0) > 500
+
+    # una horquilla: ida y vuelta casi por el mismo sitio, 40 m aparte
+    ida = np.column_stack([np.linspace(0, 5000, 120), np.zeros(120)])
+    vuelta = np.column_stack([np.linspace(5000, 0, 120), np.full(120, 40.0)])
+    horquilla = np.vstack([ida, vuelta])
+    assert metricas.autoproximidad(horquilla, 1000.0) == pytest.approx(40.0,
+                                                                      abs=1.0)
+
+    # las dos tienen sinuosidad alta, que es lo que las confunde
+    assert metricas.sinuosidad(np.pi * 2000, rodeo[[0, -1]]) > 1.5
+    assert metricas.sinuosidad(10000.0, horquilla[[0, -1]]) > 100
+
+
+def test_autoproximidad_de_una_recta_es_infinita():
+    import numpy as np
+    recta = np.column_stack([np.linspace(0, 5000, 50), np.zeros(50)])
+    assert metricas.autoproximidad(recta, 1000.0) > 900
+
+
+def test_giro_maximo_caza_la_inversion_de_una_union():
+    import numpy as np
+
+    suave = np.column_stack([np.linspace(0, 1000, 20),
+                             np.linspace(0, 100, 20)])
+    assert metricas.giro_maximo(suave) < 5
+
+    # un vertice donde la linea se invierte
+    pico = np.array([[0.0, 0.0], [1000.0, 0.0], [10.0, 30.0]])
+    assert metricas.giro_maximo(pico) > 150
+
+    assert metricas.giro_maximo(np.array([[0.0, 0.0]])) == 0.0

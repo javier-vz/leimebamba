@@ -275,17 +275,33 @@ def construir(z, mascara, componentes: dict[str, np.ndarray], dx: float,
             continue
 
         ok = mascara[org] & mascara[dst]
+        largo = float(np.hypot(di * dy, dj * dx))
+
         for ei, ej in intermedias(di, dj):
-            mi, _ = _vistas(forma, ei, ej)
             # la celda intermedia vista desde el origen
             inter = (slice(org[0].start + ei, org[0].stop + ei),
                      slice(org[1].start + ej, org[1].stop + ej))
             ok &= mascara[inter]
 
+            # Y SU PENDIENTE, no solo que sea transitable. Un salto de
+            # caballo mide 67 m y el gradiente MEDIO de la arista puede estar
+            # dentro del rango escondiendo un escalon en el medio: comprobar
+            # solo la mascara deja pasar aristas que suben un acantilado y
+            # bajan al otro lado, y el modelo entonces encuentra atajos por
+            # donde no se puede caminar. Se exige que los dos tramos del
+            # salto, origen->intermedia e intermedia->destino, esten cada uno
+            # dentro del rango.
+            l1 = float(np.hypot(ei * dy, ej * dx))
+            l2 = float(np.hypot((di - ei) * dy, (dj - ej) * dx))
+            with np.errstate(invalid="ignore"):
+                g1 = (z[inter] - z[org]) / l1
+                g2 = (z[dst] - z[inter]) / l2
+            ok &= (np.isfinite(g1) & (np.abs(g1) <= g_max)
+                   & np.isfinite(g2) & (np.abs(g2) <= g_max))
+
         if not ok.any():
             continue
 
-        largo = float(np.hypot(di * dy, dj * dx))
         with np.errstate(invalid="ignore"):
             g = (z[dst] - z[org]) / largo
         ok &= np.isfinite(g) & (np.abs(g) <= g_max)

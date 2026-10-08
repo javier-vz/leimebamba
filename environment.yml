@@ -10,6 +10,7 @@ dependencies:
   - geopandas       # vectores y GeoPackage (sin ogr2ogr)
   - shapely         # buffers, linemerge, substring
   - pyyaml
+  - networkx        # el Qhapaq Nan como red (paso 'red')
   - joblib          # el barrido en paralelo
   - matplotlib
   - requests

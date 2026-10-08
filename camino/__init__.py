@@ -28,7 +28,9 @@ Modulos, en el orden en que se usan:
     nulos          campos gaussianos y el valor p empirico
     equifinalidad  conjuntos casi-optimos y el perfil de Jaccard
     figuras        las dos figuras del articulo
+    red            el Qhapaq Nan como RED (no la rejilla): otra pregunta
+    campo          de la razon de costo a una salida de campo: estaciones
 """
 
-__version__ = "0.15.0"
-FECHA = "2026-10-06"
+__version__ = "0.20.0"
+FECHA = "2026-10-07"

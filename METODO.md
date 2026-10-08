@@ -11,8 +11,10 @@ celda a su vecina. Todo lo demás es cómo llenarla y cómo barrer sus pesos.
 
 Para cada arista dirigida que va de la celda $i$ a la celda $j$:
 
-$$c_{ij}(\mathbf{w}) \;=\; L_{ij}\sum_{k=1}^{K} w_k\,\varphi_k(i,j),
-\qquad \sum_{k=1}^{K} w_k = 1,\quad w_k \ge 0$$
+$$
+c_{ij}(\mathbf{w}) \;=\; L_{ij}\sum_{k=1}^{K} w_k\,\varphi_k(i,j),
+\qquad \sum_{k=1}^{K} w_k = 1,\quad w_k \ge 0
+$$
 
 - $L_{ij}$ es la longitud de la arista en metros.
 - $\varphi_k(i,j)$ es la componente $k$ del costo, adimensional, del orden de 1.
@@ -53,8 +55,10 @@ Código: `camino/grafo.py`, método `Grafo.costos`; `camino/pipeline.py`,
 
 Primero el gradiente **dirigido** de la arista:
 
-$$L_{ij} = \sqrt{(x_j-x_i)^2 + (y_j-y_i)^2},
-\qquad g_{ij} = \frac{z_j - z_i}{L_{ij}}$$
+$$
+L_{ij} = \sqrt{(x_j-x_i)^2 + (y_j-y_i)^2},
+\qquad g_{ij} = \frac{z_j - z_i}{L_{ij}}
+$$
 
 Aquí vive toda la asimetría del modelo, porque $g_{ij} = -g_{ji}$. Las otras
 componentes son simétricas; es este término el que hace que ir de Leimebamba a
@@ -65,7 +69,9 @@ vas.
 Luego el costo metabólico de caminar, en J·kg⁻¹·m⁻¹
 (Minetti *et al.* 2002):
 
-$$C_w(g) \;=\; 280.5\,g^{5} - 58.7\,g^{4} - 76.8\,g^{3} + 51.9\,g^{2} + 19.6\,g + 2.5$$
+$$
+C_w(g) \;=\; 280.5\,g^{5} - 58.7\,g^{4} - 76.8\,g^{3} + 51.9\,g^{2} + 19.6\,g + 2.5
+$$
 
 Ajustada con $R^2 = 0.999$ sobre $g \in [-0.45,\,+0.45]$. Valores de
 referencia, para comprobar cualquier implementación:
@@ -83,9 +89,14 @@ significar nada. Las aristas con $|g| > g_{\max}$ **se eliminan del grafo**, no
 se recortan a 0.45 — recortarlas convierte un acantilado en una cuesta
 transitable.
 
+Y la restricción se aplica **a cada tramo del salto, no sólo a su promedio**.
+Por qué importa, en §4.
+
 La componente, normalizada a 1 en terreno plano:
 
-$$\varphi_{\text{pend}}(i,j) \;=\; \frac{C_w(g_{ij})}{C_w(0)} \;=\; \frac{C_w(g_{ij})}{2.5}$$
+$$
+\varphi_{\text{pend}}(i,j) \;=\; \frac{C_w(g_{ij})}{C_w(0)} \;=\; \frac{C_w(g_{ij})}{2.5}
+$$
 
 Para contrastar se puede correr la función de marcha de Tobler (1993),
 $v(g) = 1.662\,e^{-3.5|g+0.05|}$ m/s con costo por metro $1/v$, pero **como
@@ -100,8 +111,10 @@ Código: `camino/costo.py`.
 Son propiedades de la celda y no del paso, así que la arista toma el promedio
 de sus dos extremos:
 
-$$\varphi_k(i,j) \;=\; \tfrac{1}{2}\left[\tilde\varphi_k(i) + \tilde\varphi_k(j)\right],
-\qquad k \in \{\text{cer},\ \text{vis}\}$$
+$$
+\varphi_k(i,j) \;=\; \tfrac{1}{2}\left[\tilde\varphi_k(i) + \tilde\varphi_k(j)\right],
+\qquad k \in \{\text{cer},\ \text{vis}\}
+$$
 
 Las dos salen del **mismo archivo de entrada** —los espacios ceremoniales
 documentados— y le preguntan cosas distintas: si lo que condiciona el trazado
@@ -137,9 +150,11 @@ cero, Dijkstra devuelve caminos degenerados que recorren kilómetros gratis.
 
 ### 3.1 Proximidad
 
-$$\tilde\varphi_{\text{cer}}(i) \;=\; \varepsilon + \operatorname{clip}\!\left(
+$$
+\tilde\varphi_{\text{cer}}(i) \;=\; \varepsilon + \operatorname{clip}\!\left(
 \frac{d_{\min}(i)}{d_{\text{sat}}},\ 0,\ 1\right),
-\qquad d_{\text{sat}} = 5000\ \text{m}$$
+\qquad d_{\text{sat}} = 5000\ \text{m}
+$$
 
 con $d_{\min}(i)$ la distancia euclidiana de la celda al sitio pertinente más
 próximo. Satura, y no crece sin límite, porque sin saturar un sitio aislado
@@ -169,8 +184,10 @@ Así que la forma que sí se transfiere es la **intervisibilidad con los propios
 espacios ceremoniales**: la fracción de sitios pertinentes que se ven desde
 cada celda.
 
-$$\tilde\varphi_{\text{vis}}(i) \;=\; \varepsilon + 1 - \frac{1}{|P|}
-\sum_{p \in P} \mathbb{1}\!\left[\,p \text{ visible desde } i\,\right]$$
+$$
+\tilde\varphi_{\text{vis}}(i) \;=\; \varepsilon + 1 - \frac{1}{|P|}
+\sum_{p \in P} \mathbf{1}\!\left[\,p \text{ visible desde } i\,\right]
+$$
 
 Ver sale barato y no ver sale caro, para ir en el mismo sentido que la
 proximidad. Sólo cuentan los sitios a menos de un **radio** (8 km por
@@ -181,8 +198,10 @@ La línea de vista se muestrea a paso de media celda con interpolación
 bilineal del DEM, y el terreno intermedio se corrige por curvatura y
 refracción sobre la cuerda entre los dos extremos:
 
-$$\Delta z(d_p) \;=\; (1-k)\,\frac{d_p\,(d - d_p)}{2R},
-\qquad k = 0.13,\ R = 6371\ \text{km}$$
+$$
+\Delta z(d_p) \;=\; (1-k)\,\frac{d_p\,(d - d_p)}{2R},
+\qquad k = 0.13,\ R = 6371\ \text{km}
+$$
 
 El terreno **sube** respecto de la recta, no baja: la cuerda entre dos puntos
 de la esfera pasa por dentro, así que el suelo de en medio se interpone. Es
@@ -222,19 +241,27 @@ diferencias a las componentes añadidas y no al espacio por donde se puede ir.
 
 Ventana 3×3 de Horn, sobre el DEM **sin rellenar**:
 
-$$\frac{\partial z}{\partial E} = \frac{(z_3 + 2z_6 + z_9) - (z_1 + 2z_4 + z_7)}{8\,\Delta x},
+$$
+\frac{\partial z}{\partial E} = \frac{(z_3 + 2z_6 + z_9) - (z_1 + 2z_4 + z_7)}{8\,\Delta x},
 \qquad
-\frac{\partial z}{\partial N} = \frac{(z_1 + 2z_2 + z_3) - (z_7 + 2z_8 + z_9)}{8\,\Delta y}$$
+\frac{\partial z}{\partial N} = \frac{(z_1 + 2z_2 + z_3) - (z_7 + 2z_8 + z_9)}{8\,\Delta y}
+$$
 
-$$S = \arctan\sqrt{\left(\frac{\partial z}{\partial E}\right)^2 + \left(\frac{\partial z}{\partial N}\right)^2},
+$$
+S = \arctan\sqrt{\left(\frac{\partial z}{\partial E}\right)^2 + \left(\frac{\partial z}{\partial N}\right)^2},
 \qquad
-A = \operatorname{atan2}\!\left(-\frac{\partial z}{\partial E},\ -\frac{\partial z}{\partial N}\right)$$
+A = \operatorname{atan2}\!\left(-\frac{\partial z}{\partial E},\ -\frac{\partial z}{\partial N}\right)
+$$
 
 ### 3.2 bis Rugosidad: VRM, no TRI, y como restricción
 
-$$\mathbf{n} = \big(\sin S \sin A,\ \ \sin S \cos A,\ \ \cos S\big)$$
+$$
+\mathbf{n} = \big(\sin S \sin A,\ \ \sin S \cos A,\ \ \cos S\big)
+$$
 
-$$\mathrm{VRM} \;=\; 1 - \frac{\left\lVert \sum_{c \in W} \mathbf{n}_c \right\rVert}{|W|}$$
+$$
+\mathrm{VRM} \;=\; 1 - \frac{\left\lVert \sum_{c \in W} \mathbf{n}_c \right\rVert}{|W|}
+$$
 
 con $W$ la ventana 3×3 y $|W| = 9$ (Sappington *et al.* 2007). $\mathrm{VRM}
 \in [0,1]$: 0 es plano **o** inclinado pero uniforme; cerca de 1, terreno
@@ -248,7 +275,9 @@ sobre un plano inclinado el VRM es cero exactamente, por inclinado que esté.
 
 Y entra como **restricción**, no como peso:
 
-$$\text{celda transitable} \iff \mathrm{VRM} \le q_{99}\!\left(\mathrm{VRM}\right)$$
+$$
+\text{celda transitable} \iff \mathrm{VRM} \le q_{99}\!\left(\mathrm{VRM}\right)
+$$
 
 El percentil 99 deja fuera el 1% más roto del corredor: farallones y terreno
 desmoronado. Es la frontera entre «por aquí no se pasa» y «por aquí es caro
@@ -271,7 +300,9 @@ acumulación exacta recorriendo las celdas en orden decreciente de elevación.
 
 Dificultad de cruzar un drenaje, que crece con el área que drena por la celda:
 
-$$\phi_{\text{dren}} = \log_{10}\!\big(1 + A_{\text{celdas}}\big)$$
+$$
+\phi_{\text{dren}} = \log_{10}\!\big(1 + A_{\text{celdas}}\big)
+$$
 
 Se calcula y se guarda (`derivados/acumulacion.tif`), pero **no lleva peso**:
 es diagnóstico. Está ahí porque es lo que explica por qué los ríos no se
@@ -282,7 +313,9 @@ esta superficie tiene algo que decir.
 Y el anegamiento del suelo, que en bosque de neblina es lo que la pendiente no
 ve:
 
-$$\mathrm{TWI} = \ln\!\left(\frac{a}{\tan S + 0.001}\right)$$
+$$
+\mathrm{TWI} = \ln\!\left(\frac{a}{\tan S + 0.001}\right)
+$$
 
 con $a$ el área de contribución específica (área por unidad de contorno, m).
 
@@ -304,6 +337,40 @@ $(\pm2,\pm1)$, y **pasan por encima de dos celdas intermedias**: hay que
 comprobar que esas celdas sean transitables antes de crear la arista. Es el
 error clásico de la vecindad 16 y hace que los caminos salten acantilados y
 ríos.
+
+Comprobar que sean transitables **no basta**, y esto es más sutil. El
+gradiente de una arista se calcula sobre su largo entero,
+
+$$
+g_{ij} \;=\; \frac{z_j - z_i}{L_{ij}},
+$$
+
+y un salto de caballo mide $L = \sqrt{30^2 + 60^2} = 67$ m. Un promedio de
+0.40 sobre 67 m puede esconder un escalón de 40 m en el medio: la arista pasa
+el filtro, el camino de mínimo costo la usa, y el modelo encuentra un atajo
+por donde no se puede caminar. La máscara no lo ve, porque la celda del
+escalón es perfectamente transitable; lo que no es transitable es **llegar a
+ella**.
+
+Así que a cada celda intermedia $m$ se le exigen los dos tramos:
+
+$$
+\left|\frac{z_m - z_i}{L_{im}}\right| \le g_{\max}
+\quad\text{y}\quad
+\left|\frac{z_j - z_m}{L_{mj}}\right| \le g_{\max},
+$$
+
+y la arista sólo existe si las dos intermedias lo cumplen. En la caja de este
+estudio eso quita **3 115 778 aristas, el 10.5%** de las 29.7 millones.
+
+No es un detalle de implementación: cambió un resultado. Antes de la
+corrección, la ruta modelada de Pauja – Santa Cruz tenía el **9.2% de su
+largo por encima del 45%**, con 90 m seguidos al 158% — una pared de 58° —, y
+contra esa ruta imposible el camino real salía un 45% más caro. Con la
+restricción bien aplicada el máximo de esa ruta baja a 63% y la razón cae a
+1.39. El tramo sigue siendo el peor explicado de los seis, que es el punto:
+**el resultado sobrevivió a su propia corrección**, y eso dice más a su favor
+que el número original.
 
 La **máscara** saca del dominio: las celdas sin ninguna arista con
 $|g| \le g_{\max}$, las lagunas, y un corredor alrededor del camino
@@ -358,9 +425,13 @@ Código: `camino/grafo.py`.
 
 Red regular sobre el símplex con paso $h = 1/n$:
 
-$$\Lambda_{K,h} = \left\{\mathbf{w} : w_k = \frac{m_k}{n},\ \ m_k \in \mathbb{Z}_{\ge 0},\ \ \sum_{k=1}^{K} m_k = n\right\}$$
+$$
+\Lambda_{K,h} = \left\{\mathbf{w} : w_k = \frac{m_k}{n},\ \ m_k \in \mathbb{Z}_{\ge 0},\ \ \sum_{k=1}^{K} m_k = n\right\}
+$$
 
-$$\bigl|\Lambda_{K,h}\bigr| = \binom{n + K - 1}{K - 1}$$
+$$
+\bigl|\Lambda_{K,h}\bigr| = \binom{n + K - 1}{K - 1}
+$$
 
 Con $n = 20$ ($h = 0.05$): $K = 3$ da **231** vectores, $K = 4$ da **1771**.
 
@@ -392,16 +463,22 @@ Se reportan **dos** números, no uno.
 
 La distancia media simétrica mide el desacuerdo típico:
 
-$$D_H(P,Q) = \tfrac{1}{2}\left(
+$$
+D_H(P,Q) = \tfrac{1}{2}\left(
 \frac{1}{|P|}\sum_{p \in P} \min_{q \in Q} \lVert p-q \rVert
-+ \frac{1}{|Q|}\sum_{q \in Q} \min_{p \in P} \lVert q-p \rVert \right)$$
++ \frac{1}{|Q|}\sum_{q \in Q} \min_{p \in P} \lVert q-p \rVert \right)
+$$
 
 La Fréchet discreta mide el peor desacuerdo **respetando el orden del
 recorrido** (Eiter & Mannila 1994):
 
-$$\delta(a,b) = \max\Big\{\, d(P_a, Q_b),\ \ \min\big\{\delta(a{-}1,b),\ \delta(a{-}1,b{-}1),\ \delta(a,b{-}1)\big\}\Big\}$$
+$$
+\delta(a,b) = \max\Big\{\, d(P_a, Q_b),\ \ \min\big\{\delta(a{-}1,b),\ \delta(a{-}1,b{-}1),\ \delta(a,b{-}1)\big\}\Big\}
+$$
 
-$$D_F(P,Q) = \delta\big(|P|,\,|Q|\big)$$
+$$
+D_F(P,Q) = \delta\big(|P|,\,|Q|\big)
+$$
 
 $D_H$ sola esconde que el modelo se fue por otra quebrada y volvió; $D_F$ sola
 castiga igual un desvío puntual que un error sistemático. El óptimo se busca
@@ -417,19 +494,23 @@ antes de comparar.
 
 El óptimo de un sector es entonces:
 
-$$\mathbf{w}^{*}_{s} = \arg\min_{\mathbf{w} \in \Lambda_{K,h}}
-D_H\big(P_s(\mathbf{w}),\ Q_s\big)$$
+$$
+\mathbf{w}^{*}_{s} = \arg\min_{\mathbf{w} \in \Lambda_{K,h}}
+D_H\big(P_s(\mathbf{w}),\ Q_s\big)
+$$
 
 Código: `camino/metricas.py`.
 
-## 6 quater. La razón de costo: cómo se lee una $\bar D$ grande
+## 6 quater. La razón de costo: cómo se lee una separación grande
 
 La distancia geométrica, sola, no distingue dos situaciones que significan lo
 contrario. Una ruta puede estar lejos del óptimo y **costar casi lo mismo**
 —hay muchas maneras de cruzar un paisaje por un precio parecido— o puede
 estar lejos y costar mucho más. Las dos dan la misma $\bar D$.
 
-$$r \;=\; \frac{C(\text{trazado observado})}{C(\text{óptimo})} \;\ge\; 1$$
+$$
+r \;=\; \frac{C(\text{trazado observado})}{C(\text{óptimo})} \;\ge\; 1
+$$
 
 - $r \approx 1$: el modelo **no distingue** las dos rutas. El terreno no
   decide por dónde va el camino en esa unidad, y la $\bar D$ grande mide la
@@ -454,6 +535,47 @@ modelado. Es lo que explica una diferencia de longitud: si el observado tiene
 sinuosidad 2.0 y el modelado 1.0, el camino real da una vuelta que el modelo
 no reproduce, y eso es una afirmación sobre el trazado, no un error de
 medida.
+
+## 6 quinquies. La razón de costo es un promedio: dónde se localiza
+
+$\rho = 1.39$ sobre 20.7 km no dice adónde ir. El desvío que la produce puede
+estar concentrado en 2 km o repartido por todo el tramo, y las dos cosas dan
+el mismo número y piden trabajos de campo distintos. El paso `campo` la
+desarma.
+
+Sobre el trazado observado $O$, muestreado cada celda, se mide la separación
+a la ruta modelada $M$:
+
+$$
+d(s) \;=\; \min_{q \in M} \; \lVert O(s) - q \rVert .
+$$
+
+Una **zona** es un tramo conexo $[s_a, s_b]$ con $d(s) > \delta$ en todo él y
+$s_b - s_a \ge \ell_{\min}$, con $\delta = 250$ m y $\ell_{\min} = 500$ m.
+El umbral $\delta$ es el piso por debajo del cual la diferencia no significa
+nada: error de digitalización del registro más tamaño de celda. Los bordes se
+toman un paso **antes** de cruzar $\delta$, donde las dos rutas todavía van
+juntas; ése es el único punto desde el que alguien que fuera caminando habría
+visto las dos opciones.
+
+A cada zona se le mide su propia razón, con los mismos dos extremos para las
+dos alternativas:
+
+$$
+\rho_{\text{loc}} \;=\;
+\frac{c\!\left(O|_{[s_a,\,s_b]}\right)}
+     {\min_{\pi:\,O(s_a) \to O(s_b)} c(\pi)} .
+$$
+
+Que los extremos sean los mismos es lo que hace comparable el cociente, igual
+que en §6 quater. Lo que aparece al desarmarlo es que el desvío **sí** está
+concentrado: La Jalca – Mendoza marca $\rho = 1.07$ en 28 km, y dentro tiene
+7.2 km con $\rho_{\text{loc}} = 1.24$ mientras el resto va pegado al modelo.
+Chachapoyas – Jumbilla marca 1.22 en 61 km y sus últimos 7 km marcan 1.31.
+
+Una zona más larga que $20$ km no se trata como destino de campo aunque su
+razón sea alta: su desvío está repartido y no hay un lugar al que llegar. El
+filtro de largo va **antes** de ordenar por razón, no después.
 
 ## 6 ter. El dominio de cada unidad, y por qué `revisar` se mide ahí
 
@@ -529,11 +651,15 @@ muchos vectores de pesos distintos producen caminos prácticamente iguales. Lo
 que se puede sostener es el conjunto de pesos que explican el camino observado
 casi igual de bien:
 
-$$S_s(\tau) = \big\{\mathbf{w} \in \Lambda_{K,h} :\ D_s(\mathbf{w}) \le (1+\tau)\,D^{*}_{s}\big\}$$
+$$
+S_s(\tau) = \big\{\mathbf{w} \in \Lambda_{K,h} :\ D_s(\mathbf{w}) \le (1+\tau)\,D^{*}_{s}\big\}
+$$
 
 y cómo se comparan esos conjuntos entre sectores:
 
-$$J_{st}(\tau) = \frac{\bigl|S_s(\tau) \cap S_t(\tau)\bigr|}{\bigl|S_s(\tau) \cup S_t(\tau)\bigr|}$$
+$$
+J_{st}(\tau) = \frac{\bigl|S_s(\tau) \cap S_t(\tau)\bigr|}{\bigl|S_s(\tau) \cup S_t(\tau)\bigr|}
+$$
 
 **Graficar $J_{st}$ contra $\tau$ es la respuesta a la pregunta del
 proyecto.** Dos sectores cuyos conjuntos se separan —$J$ baja y se queda baja
@@ -558,13 +684,17 @@ conserva la autocorrelación espacial de la superficie real y sólo destruye su
 relación con el terreno: campos gaussianos con el mismo exponente espectral,
 por síntesis espectral,
 
-$$\hat g(\mathbf{k}) = \mathcal{N}(0,1)\cdot \lVert\mathbf{k}\rVert^{-\beta/2}$$
+$$
+\hat g(\mathbf{k}) = \mathcal{N}(0,1)\cdot \lVert\mathbf{k}\rVert^{-\beta/2}
+$$
 
 con $\beta$ estimado del periodograma radial de la propia superficie de costo,
 y escalados al mismo rango por los mismos percentiles. Luego, con $M$
 realizaciones:
 
-$$p_s = \frac{1 + \#\{m : D^{\text{nulo}}_m \le D^{*}_{s}\}}{M+1}$$
+$$
+p_s = \frac{1 + \#\{m : D^{\text{nulo}}_m \le D^{*}_{s}\}}{M+1}
+$$
 
 El piso es $1/(M+1)$: con $M = 500$ **no se puede reportar «$p < 0.002$»**, se
 reporta «$p = 0.002$ con $M = 500$».
@@ -620,7 +750,9 @@ silencio.
 
 Lo que el método sí hace es medir y avisar. Para cada grupo,
 
-$$\rho = \frac{\text{diagonal de su caja envolvente}}{\sum \text{longitud de sus rasgos}}$$
+$$
+\rho = \frac{\text{diagonal de su caja envolvente}}{\sum \text{longitud de sus rasgos}}
+$$
 
 Un camino es al menos tan largo como la recta entre sus extremos, así que
 $\rho \approx 1$; con los huecos del registro sube a 2 o 3. Una etiqueta
@@ -646,9 +778,11 @@ el proyecto pide: caminos de mínimo costo entre los mismos extremos, sobre
 terreno sintético con la misma autocorrelación espacial que el real. Así que
 basta evaluarles el costo bajo el modelo de referencia:
 
-$$r_m \;=\; \frac{C(\text{ruta plausible } m)}{C(\text{óptimo})},
+$$
+r_m \;=\; \frac{C(\text{ruta plausible } m)}{C(\text{óptimo})},
 \qquad
-p \;=\; \frac{\#\{\, m : r_m \le r_{\text{obs}} \,\} + 1}{M + 1}$$
+p \;=\; \frac{\#\{\, m : r_m \le r_{\text{obs}} \,\} + 1}{M + 1}
+$$
 
 - $p$ pequeño: el trazado real es **más barato que casi cualquier alternativa
   plausible por ahí**. El trazado es sensible al costo físico, aunque su
@@ -681,9 +815,11 @@ Para eso, por cada unidad:
 4. Se repite con cada bloque como retenido, y se comparan los dos modelos
    bloque a bloque.
 
-$$\mathbf{w}^{(-k)} = \arg\min_{\mathbf{w}\in\Delta}
+$$
+\mathbf{w}^{(-k)} = \arg\min_{\mathbf{w}\in\Delta}
 \ \frac{1}{B-1}\sum_{b \ne k} D_b(\mathbf{w}),
-\qquad\text{se reporta } D_k\!\left(\mathbf{w}^{(-k)}\right)$$
+\qquad\text{se reporta } D_k\!\left(\mathbf{w}^{(-k)}\right)
+$$
 
 **Bloques contiguos y no una partición aleatoria**, y esto no es un detalle:
 puntos espacialmente próximos comparten terreno, así que repartirlos al azar

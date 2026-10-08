@@ -9,6 +9,8 @@ derivados/
 resultados/*.gpkg
 resultados/*.shp
 resultados/*.geojson
+resultados/*.gpx
+resultados/*.csv
 
 # La llave de OpenTopography va en la variable de entorno, no en el archivo.
 .env

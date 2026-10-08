@@ -863,8 +863,12 @@ def validar(cfg, n_bloques: int | None = None):
 
     n_bloques = cfg.n_bloques if n_bloques is None else n_bloques
     iguales = _modelos_iguales(cfg)
-    g, t, uds = _carga_unidades(cfg)
     puntos, _ = sitios.carga(cfg)
+    if not len(puntos):
+        # Sin esto va omitiendo bloque por bloque y acaba en "ninguna unidad
+        # dio para validar", que no dice cual es el problema.
+        _exige_sitios_o_explica(cfg)
+    g, t, uds = _carga_unidades(cfg)
     redes = {m: red_del_modelo(cfg, g.nombres, comps)
              for m, comps in cfg.modelos.items()}
 
@@ -1044,7 +1048,13 @@ def _inestable(filas, umbral: float = 0.75) -> bool:
 
 def resultados(cfg):
     """El perfil de Jaccard: la respuesta a la pregunta del proyecto."""
-    d = np.load(cfg.dir_derivados / "barrido.npz")
+    ruta = cfg.dir_derivados / "barrido.npz"
+    if not ruta.exists():
+        raise SystemExit(
+            "Falta derivados/barrido.npz: este paso dibuja lo que el barrido\n"
+            "calculo, y el barrido no ha terminado.\n"
+            "\nCorre antes:  python -m camino barrido")
+    d = np.load(ruta)
     red = d["red"]
     D_por_unidad = {k: d[k] for k in d.files if k != "red"}
 

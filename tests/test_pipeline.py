@@ -435,3 +435,67 @@ def test_el_nulo_de_costo_da_p_en_cero_uno_y_sabe_callarse(capsys):
         {"u": np.nan}, {"u": np.array([np.nan])})
     assert vacio == {}
     assert "n/d" in capsys.readouterr().out
+
+
+def test_avisa_cuando_la_unidad_puede_no_ser_un_camino(capsys):
+    """`linemerge` cose por vertices compartidos: la pieza mayor de un tramo
+    con horquilla puede ser una rama de ida y otra de vuelta."""
+    limpia = {"unidad": "buena", "autoproximidad_m": 2400.0,
+              "giro_maximo_grados": 38.0}
+    horquilla = {"unidad": "sospechosa", "autoproximidad_m": 42.0,
+                 "giro_maximo_grados": 171.0}
+
+    assert pipeline._avisa_de_la_geometria([limpia]) == []
+    capsys.readouterr()
+
+    avisos = pipeline._avisa_de_la_geometria([limpia, horquilla])
+    assert len(avisos) == 1 and avisos[0].startswith("sospechosa")
+    texto = capsys.readouterr().out
+    assert "puede que esto no sea UN camino" in texto
+    assert "42 m de si misma" in texto
+    assert "171 grados" in texto
+
+
+def test_la_revision_reporta_la_geometria_de_cada_unidad(corrido):
+    for f in corrido["revision"]:
+        assert f["autoproximidad_m"] > 0
+        assert 0 <= f["giro_maximo_grados"] <= 180
+
+
+def test_el_barrido_para_antes_del_bucle_si_faltan_los_sitios(corrido):
+    """Antes reventaba dentro de la primera unidad, despues de cargar el
+    grafo. El error era el mismo pero llegaba tarde."""
+    import dataclasses
+    cfg = dataclasses.replace(corrido["cfg"], ceremonial_archivo="")
+
+    # con sitios en datos/ no se queja
+    pipeline._exige_sitios_o_explica(
+        dataclasses.replace(cfg, componentes_ampliado=("fisico",)))
+
+    with pytest.raises(SystemExit, match="no hay archivo de sitios"):
+        pipeline._exige_sitios_o_explica(
+            dataclasses.replace(
+                cfg, componentes_ampliado=("fisico", "ceremonial")))
+
+
+def test_dice_que_quitar_las_componentes_no_es_la_salida(corrido):
+    """El mensaje tiene que desaconsejar el atajo: con una componente el
+    simplex es un punto y el barrido no aporta nada sobre `revisar`."""
+    import dataclasses
+    cfg = dataclasses.replace(
+        corrido["cfg"], componentes_ampliado=("fisico", "ceremonial"))
+    try:
+        pipeline._exige_sitios_o_explica(cfg)
+    except SystemExit as e:
+        assert "no aporta nada" in str(e)
+        assert "columna D de `revisar`" in str(e)
+    else:
+        raise AssertionError("tenia que parar")
+
+
+def test_resultados_dice_que_falta_el_barrido(tmp_path, corrido):
+    """Antes daba un FileNotFoundError crudo sobre un .npz."""
+    import dataclasses
+    cfg = dataclasses.replace(corrido["cfg"], raiz=tmp_path)
+    with pytest.raises(SystemExit, match="el barrido no ha terminado"):
+        pipeline.resultados(cfg)

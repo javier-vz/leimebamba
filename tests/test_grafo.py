@@ -248,3 +248,60 @@ def test_costo_a_lo_largo_nunca_baja_del_optimo():
         if cam.size < 2:
             continue
         assert grafo.costo_a_lo_largo(csr, cam) >= float(dist[destino]) - 1e-9
+
+
+def test_el_salto_de_caballo_no_cruza_un_escalon_que_su_promedio_esconde():
+    """El defecto que hacia que el modelo encontrara atajos impasables.
+
+    Un salto (1,2) mide 67 m. Con origen a 0 m y destino a 20 m su gradiente
+    MEDIO es 0.30, dentro del rango de Minetti. Pero si la celda intermedia
+    esta a 40 m, el primer tramo sube 40 m en 30: un 133%. Comprobar solo que
+    la intermedia sea transitable deja pasar esa arista, y el camino de
+    minimo costo se va por el acantilado.
+    """
+    import numpy as np
+
+    from camino import grafo
+
+    z = np.zeros((4, 4), dtype=float)
+    z[1, 2] = 20.0                  # destino del salto (1,2) desde (0,0)
+    z[0, 1] = z[1, 1] = 40.0        # las dos intermedias: el escalon
+    mascara = np.ones((4, 4), dtype=bool)
+
+    # el promedio del salto esta dentro del rango de Minetti
+    assert abs((z[1, 2] - z[0, 0]) / np.hypot(30.0, 60.0)) < 0.45
+
+    g = grafo.construir(z, mascara, {}, dx=30.0, vecinos=((1, 2),))
+    # ...y aun asi la arista no existe, porque el primer tramo no lo esta
+    assert g._csr[g.indice[0, 0], g.indice[1, 2]] == 0
+    # una arista (1,2) en terreno llano del mismo grafo si sobrevive
+    assert g._csr[g.indice[2, 0], g.indice[3, 2]] == 1
+
+
+def test_sin_escalon_el_mismo_salto_si_existe():
+    """La correccion tiene que quitar la arista mala y solo esa."""
+    import numpy as np
+
+    from camino import grafo
+
+    z = np.zeros((4, 4), dtype=float)
+    z[1, 2] = 20.0
+    z[0, 1] = z[1, 1] = 10.0        # cuesta suave en vez de escalon
+    g = grafo.construir(z, np.ones((4, 4), dtype=bool), {}, dx=30.0,
+                        vecinos=((1, 2),))
+    assert g._csr[g.indice[0, 0], g.indice[1, 2]] == 1
+
+
+def test_el_salto_tampoco_cruza_un_escalon_de_bajada():
+    """Con el escalon hacia abajo: una arista que cae a un hoyo y vuelve a
+    subir tiene gradiente medio pequeno y es igual de impasable."""
+    import numpy as np
+
+    from camino import grafo
+
+    z = np.zeros((4, 4), dtype=float)
+    z[0, 1] = z[1, 1] = -40.0
+    g = grafo.construir(z, np.ones((4, 4), dtype=bool), {}, dx=30.0,
+                        vecinos=((1, 2),))
+    assert abs((z[1, 2] - z[0, 0]) / np.hypot(30.0, 60.0)) < 0.45
+    assert g._csr[g.indice[0, 0], g.indice[1, 2]] == 0

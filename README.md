@@ -189,19 +189,27 @@ O `python -m camino todo` de corrido.
 | 4 | `superficies` | pendiente y aspecto; la rugosidad, como **restricción**, recorta la máscara; el drenaje queda de diagnóstico | `derivados/pendiente_rad.tif`, `rugosidad.tif`, `acumulacion.tif`, `mascara.tif` | 2–5 min |
 | 5 | `grafo` | el grafo de tránsito, con una columna por componente | `derivados/grafo.npz` | 1–2 min |
 | 6 | `revisar` | traza **un camino por unidad** para que los mires | `resultados/revision_pendiente.gpkg`, `revision_grafo.json` | segundos |
-| 7 | `nulos` | el terreno aleatorio de comparación, por unidad | `derivados/nulos.npz` | ~15 min |
-| 8 | `barrido` | corre **los dos modelos** sobre cada unidad y los compara | `resultados/optimos_por_unidad.json`, `caminos_optimos.gpkg` | ~30 min |
-| 9 | `validar` | la prueba que decide: pesos estimados sin un bloque, medidos **en** ese bloque | `resultados/validacion_bloqueada.json` | ~30 min |
+| 7 | `nulos` | el conjunto de control: 500 rutas plausibles por unidad, y los dos nulos (geometría y costo) | `derivados/nulos.npz` | **~2 h 15** |
+| 8 | `barrido` | corre **los dos modelos** sobre cada unidad y los compara | `resultados/optimos_por_unidad.json`, `caminos_optimos.gpkg` | ~6 min |
+| 9 | `validar` | la prueba que decide: pesos estimados sin un bloque, medidos **en** ese bloque | `resultados/validacion_bloqueada.json` | ~20 min |
 | 10 | `resultados` | el perfil de equifinalidad y su gráfico | `resultados/perfil_equifinalidad.png` | segundos |
 
-Los tiempos son estimaciones para un corredor de unos 350 000 píxeles en una
-laptop de ocho núcleos. Los largos (7, 8 y 9) salen del cálculo que está en
-`METODO.md`, §5.
+Los tiempos son **medidos** en la caja del estudio (6.44 M celdas, seis
+tramos completos, vecindades de 150 000 a 290 000 nodos) en la laptop de
+Javier, octubre 2026.
+
+`nulos` es el caro con diferencia, y no por el tamaño de la caja sino por el
+número de Dijkstras: 500 realizaciones × 6 unidades = 3 000, contra 126 del
+barrido. Si hay que repetirlo, baja `barrido.m_nulos` — con 200 el piso del
+valor *p* sube de 0.002 a 0.005, que para estos resultados sigue sobrando.
+
+Y si enciendes `visibilidad`, el barrido pasa de 21 juegos de pesos a 231:
+cuenta con una hora en vez de seis minutos.
 
 Los pasos 8 y 9 necesitan el archivo de espacios ceremoniales (§6). Sin él,
 avisan y te dicen qué hacer en vez de reventar.
 
-### Tres ayudas que no son pasos
+### Cinco ayudas que no son pasos
 
 No van en el orden: se corren cuando hacen falta.
 
@@ -211,7 +219,20 @@ python -m camino caja          # qué bbox haría falta para que los tramos
 python -m camino buscar        # encuentra la dirección del servicio de GeoCAM
 python -m camino sensibilidad  # repite el barrido con otros cortes (sólo
                                # tiene sentido con 'unidad: sector')
+python -m camino red           # el Qhapaq Ñan como RED, no como rejilla:
+                               # ¿da el registro para medir centralidad?
+python -m camino campo         # desarma la razón de costo por zonas y arma
+                               # las estaciones de campo, con su GPX
 ```
+
+`campo` necesita que `revisar` haya corrido antes, porque trabaja sobre las
+dos líneas que ése produce. Tarda unos 3 minutos y deja en `resultados/` un
+`estaciones.gpx` para el GPS, un `estaciones.gpkg` para QGIS y un
+`estaciones.csv`. Lo que hace está en `METODO.md`, §6 quinquies.
+
+`red` lee el registro **nacional sin recortar**, no la caja del estudio: es
+otra pregunta y necesita todo el sistema. Tarda unos 20 minutos y necesita
+`networkx`.
 
 La caja que propone deja **`dominio.buffer_corredor` de aire** alrededor de
 los extremos de los tramos — no un margen redondo cualquiera. Con menos, la

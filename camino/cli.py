@@ -9,7 +9,8 @@ import argparse
 import sys
 import time
 
-from . import FECHA, __version__, buscar, caja, config, pipeline, ruta as _ruta
+from . import (FECHA, __version__, buscar, caja, campo, config, pipeline,
+               red, ruta as _ruta)
 
 PASOS = {
     "bajar": (pipeline.bajar, "DEM (dos fuentes) y cuerpos de agua"),
@@ -41,6 +42,11 @@ AYUDAS = {
                "encuentra la direccion del servicio de GeoCAM y la guarda"),
     "caja": (caja.informe,
              "que caja haria falta para que los tramos entren completos"),
+    "campo": (campo.informe,
+              "desarma la razon de costo por zonas y arma las estaciones de "
+              "campo, con su GPX"),
+    "red": (red.informe,
+            "el Qhapaq Nan como RED: da el registro para medir centralidad?"),
     "sensibilidad": (pipeline.sensibilidad_sectores,
                      "repite el barrido con otros cortes: dice si la "
                      "estructura por sectores es real o del corte"),
