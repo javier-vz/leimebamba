@@ -97,12 +97,74 @@ def longitud(P) -> float:
     return float(np.linalg.norm(np.diff(P, axis=0), axis=1).sum())
 
 
+def toca_el_limite_de_busqueda(camino_xy, geometria, radio: float,
+                               holgura: float = 60.0) -> bool:
+    """True si el camino modelado llego al LIMITE del espacio de busqueda.
+
+    El limite es el buffer de radio `radio` alrededor del trazado observado:
+    mas alla de ahi al modelo no se le dejo mirar. Si el optimo se apoya en
+    ese borde, el resultado lo esta decidiendo el buffer y hay que
+    ensancharlo antes de creerse nada.
+
+    SE MIDE POR DISTANCIA, NO POR LA MASCARA, y la diferencia importa. La
+    version anterior comprobaba si el camino tenia alguna celda vecina no
+    transitable, lo que daba lo mismo mientras la unica forma de no ser
+    transitable fuera caer fuera del buffer. Desde que hay restricciones que
+    quitan celdas DENTRO del corredor -- la rugosidad, y sobre todo la
+    pendiente maxima-- esa prueba marca cualquier camino que pase al pie de
+    una ladera empinada, que es justo por donde va un camino de herradura.
+    Medido el 11-oct-2026 en las tres unidades de Leimebamba: el 100% de las
+    celdas no transitables que rozaban el camino modelado estaban excluidas
+    por pendiente, ninguna por el buffer, y aun asi las tres salian
+    marcadas. Doblar el buffer de 4 a 8 km no cambiaba ni un decimal,
+    precisamente porque el buffer nunca fue el que mandaba.
+
+    `holgura` es la tolerancia en metros: una celda de 30 m da dos.
+    """
+    import shapely.geometry as sg
+
+    xy = np.asarray(camino_xy, dtype=np.float64)
+    if xy.size == 0:
+        return False
+    if xy.ndim == 1:
+        xy = xy.reshape(1, -1)
+    lim = float(radio) - float(holgura)
+    if lim <= 0:
+        return False
+    return bool(geometria.distance(sg.MultiPoint(xy[:, :2])) >= lim) or bool(
+        max(geometria.distance(sg.Point(p[:2])) for p in xy) >= lim)
+
+
+def roza_celdas_excluidas(camino_filcol, mascara, margen: int = 1) -> int:
+    """Cuantas celdas NO transitables tocan el camino modelado.
+
+    No invalida nada: un camino que va al pie de un farallon roza celdas
+    excluidas por pendiente, y eso es lo normal, no un error. Se informa
+    porque dice que el trazado va ajustado contra una restriccion, y ahi
+    conviene mirar el mapa.
+    """
+    fc = np.asarray(camino_filcol, dtype=np.int64)
+    if fc.size == 0:
+        return 0
+    m = np.asarray(mascara, dtype=bool)
+    nf, nc = m.shape
+    fuera = set()
+    for f, c in fc:
+        for df in range(-margen, margen + 1):
+            for dc in range(-margen, margen + 1):
+                a, b = f + df, c + dc
+                if a < 0 or b < 0 or a >= nf or b >= nc or not m[a, b]:
+                    fuera.add((a, b))
+    return len(fuera)
+
+
 def toca_borde(camino_filcol, mascara, margen: int = 1) -> bool:
     """True si el camino modelado toca el borde del dominio transitable.
 
-    Chequeo de una linea que se olvida siempre: si el camino se pega al
-    borde del corredor, es el buffer el que esta decidiendo el resultado y
-    hay que ensancharlo antes de creerse nada.
+    OBSOLETA para decidir si el buffer manda: usa
+    `toca_el_limite_de_busqueda`. Se conserva porque sigue siendo la prueba
+    correcta para "el camino se apoya en algo que no se puede pisar", que es
+    lo que ahora cuenta `roza_celdas_excluidas`.
     """
     fc = np.asarray(camino_filcol, dtype=np.int64)
     if fc.size == 0:

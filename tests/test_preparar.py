@@ -295,6 +295,59 @@ def test_unidad_desconocida_se_rechaza(cfg):
         preparar.unidades(con, _camino_recto(5000.0))
 
 
+# --------------------------------- tramos omitidos por decision del estudio
+
+def test_un_tramo_omitido_no_entra_como_unidad(cfg):
+    """Es un tramo de verdad y llega al minimo; se deja fuera igual."""
+    g = _camino_con_tramos(cfg)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo",
+                       "largo_min_unidad": 100,
+                       "tramos_omitidos": ("Ubillon - Zuta",)})
+    uds = preparar.unidades(con, g)
+    assert [n for n, _ in uds] == ["Chillo - Chachapoyas"]
+
+
+def test_el_tramo_omitido_se_dice_en_la_salida(cfg, capsys):
+    """Si no se imprime, se comparan barridos de distinto tamano sin saberlo."""
+    g = _camino_con_tramos(cfg)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo",
+                       "largo_min_unidad": 100,
+                       "tramos_omitidos": ("Ubillon - Zuta",)})
+    preparar.unidades(con, g)
+    salida = capsys.readouterr().out
+    assert "OMITIDOS" in salida
+    assert "Ubillon - Zuta" in salida
+
+
+def test_omitir_no_es_lo_mismo_que_no_llegar_al_minimo(cfg):
+    """Un tramo corto NO aparece como omitido: no llego, no se descarto."""
+    g = _camino_con_tramos(cfg)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo",
+                       "largo_min_unidad": 5000,
+                       "tramos_omitidos": ()})
+    uds = preparar.unidades(con, g)
+    assert [n for n, _ in uds] == ["Chillo - Chachapoyas"]
+
+
+def test_si_se_omiten_todos_el_error_lo_dice(cfg):
+    g = _camino_con_tramos(cfg)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo",
+                       "largo_min_unidad": 100,
+                       "tramos_omitidos": ("Chillo - Chachapoyas",
+                                           "Ubillon - Zuta")})
+    with pytest.raises(SystemExit, match="tramos_omitidos"):
+        preparar.unidades(con, g)
+
+
+def test_un_nombre_omitido_que_no_existe_no_estorba(cfg):
+    g = _camino_con_tramos(cfg)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo",
+                       "largo_min_unidad": 100,
+                       "tramos_omitidos": ("Tramo que no esta", "")})
+    uds = preparar.unidades(con, g)
+    assert len(uds) == 2
+
+
 # ------------------------------------------------- subgrafo por unidad
 
 def test_el_subgrafo_conserva_los_costos_de_sus_aristas():
@@ -499,3 +552,25 @@ def test_sin_config_dice_donde_buscarlo(tmp_path):
     from camino import config as _config
     with pytest.raises(SystemExit, match="El paquete lo trae"):
         _config.Config.cargar(tmp_path / "config.yaml")
+
+
+def test_un_nombre_omitido_mal_escrito_avisa_y_sugiere(cfg, capsys):
+    """El fallo real: el registro dice 'La Jalca' y el config 'Lajalca'.
+
+    No daba error, simplemente no omitia, y el tramo seguia entrando al
+    barrido sin que nadie lo viera.
+    """
+    import geopandas as gpd
+    from shapely.geometry import LineString
+    g = gpd.GeoDataFrame(
+        {"tramnomb": ["La Jalca - Mendoza"]},
+        geometry=[LineString([(175000, 9290000), (176000, 9280000)])],
+        crs=cfg.crs)
+    con = type(cfg)(**{**cfg.__dict__, "unidad": "tramo",
+                       "largo_min_unidad": 100,
+                       "tramos_omitidos": ("Lajalca - Mendoza",)})
+    uds = preparar.unidades(con, g)
+    salida = capsys.readouterr().out
+    assert [n for n, _ in uds] == ["La Jalca - Mendoza"]   # NO se omitio
+    assert "no coinciden" in salida
+    assert "La Jalca - Mendoza" in salida                  # la sugerencia

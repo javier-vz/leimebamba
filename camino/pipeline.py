@@ -79,6 +79,20 @@ def preparar_rasteres(cfg):
         print("  'grafo' en adelante si hace falta: `python -m camino ruta`.")
         mascara = np.isfinite(a)
 
+    # DOS ARCHIVOS, NO UNO, Y ES LA CORRECCION DE UN FALLO SILENCIOSO.
+    #
+    # 'mascara_corredor.tif' es la del corredor y no la toca nadie mas.
+    # 'superficies' parte SIEMPRE de ella y escribe su resultado en
+    # 'mascara.tif'. Antes las dos eran el mismo archivo: 'superficies'
+    # leia mascara.tif, le aplicaba el percentil de rugosidad y la escribia
+    # encima. Como el umbral es un PERCENTIL de las celdas que quedan,
+    # correr el paso dos veces quitaba otro 1% sobre lo ya quitado, sin
+    # decir nada. Medido el 11-oct-2026 en Leimebamba: 1,218,343 celdas en
+    # la primera corrida y 1,056,507 en la segunda, con la misma config.
+    #
+    # Se escriben las dos para que 'superficies' pueda correrse solo.
+    preparar.escribe(cfg.dir_derivados / "mascara_corredor.tif",
+                     mascara.astype(np.float32), t, cfg.crs, nodata=0)
     preparar.escribe(cfg.dir_derivados / "mascara.tif",
                      mascara.astype(np.float32), t, cfg.crs, nodata=0)
     print(f"  {int(mascara.sum())} celdas transitables de {mascara.size} "
@@ -145,6 +159,37 @@ def _agua_geoms(cfg):
 
 # ------------------------------------------------------ 3. superficies
 
+def _avisa_si_se_partio(mascara, minimo: float = 0.95) -> float:
+    """Que fraccion de lo transitable quedo en la componente conexa mayor.
+
+    Una restriccion que quita celdas puede PARTIR el corredor, y eso no se
+    ve en el conteo de celdas: se puede perder el 20% de la superficie y
+    seguir conectado, o perder el 20% y quedarse con dos mitades que no se
+    comunican. Si pasa lo segundo, los caminos entre unidades de mitades
+    distintas no existen y el barrido corre sobre un espacio roto.
+
+    Mide y avisa; no decide. Bajar el umbral es una decision del estudio.
+    """
+    from scipy import ndimage
+
+    n = int(mascara.sum())
+    if n == 0:
+        return 0.0
+    etiquetas, cuantas = ndimage.label(mascara, structure=np.ones((3, 3), bool))
+    if cuantas == 0:
+        return 0.0
+    mayor = int(np.bincount(etiquetas.ravel())[1:].max())
+    frac = mayor / n
+    print(f"  conectividad: {cuantas} componentes, la mayor guarda "
+          f"{100 * frac:.2f}% de lo transitable")
+    if frac < minimo:
+        print(f"    AVISO: por debajo de {100 * minimo:.0f}% el corredor esta "
+              "partido. Dos unidades en trozos distintos no tienen camino\n"
+              "    entre ellas. Sube 'restricciones.pendiente_max_grados' o "
+              "'rugosidad_percentil' hasta que esto suba.")
+    return frac
+
+
 def construir_superficies(cfg):
     """Superficies derivadas y la mascara de restricciones geomorfologicas.
 
@@ -158,8 +203,23 @@ def construir_superficies(cfg):
     """
     preparar.comprueba_rejilla(cfg)
     dem, t, _ = preparar.lee(cfg.dir_derivados / "cop30.tif")
-    mascara = preparar.lee(cfg.dir_derivados / "mascara.tif")[0] > 0.5
+
+    # SIEMPRE desde la del corredor, nunca desde la propia salida: si no,
+    # el percentil de rugosidad recorta sobre lo ya recortado y cada
+    # corrida come otro 1% en silencio (ver `preparar_rasteres`).
+    corredor = cfg.dir_derivados / "mascara_corredor.tif"
+    if not corredor.exists():
+        # Proyecto hecho con una version anterior: la unica mascara que hay
+        # es 'mascara.tif', que puede venir ya recortada. Se usa, pero se
+        # avisa, porque el conteo de partida no es comparable.
+        print("  (no hay mascara_corredor.tif: este proyecto es de una "
+              "version anterior.\n   Corre `preparar` una vez para que "
+              "el conteo de partida sea fiable.)")
+        corredor = cfg.dir_derivados / "mascara.tif"
+    mascara = preparar.lee(corredor)[0] > 0.5
     mascara &= np.isfinite(dem)
+    n_entrada = int(mascara.sum())
+    print(f"  parte de {n_entrada} celdas transitables ({corredor.name})")
     res = cfg.resolucion
 
     print("Pendiente y aspecto (Horn, sobre el DEM SIN rellenar):")
@@ -174,6 +234,43 @@ def construir_superficies(cfg):
         print(f"  VRM > {umbral:.3f} (percentil {cfg.rugosidad_percentil:g}) "
               f"= intransitable: {n_antes - int(mascara.sum())} celdas fuera")
 
+    # CAMINABILIDAD: pendiente del TERRENO, que no es la del paso.
+    #
+    # 'g_max' limita el gradiente de cada ARISTA, y eso no basta: sobre una
+    # cara del 100% siempre hay una direccion oblicua cuyo gradiente queda
+    # por debajo de g_max, asi que el grafo la ofrece y el camino minimo
+    # sube el farallon zigzagueando. Son zigzags que no existen en el
+    # terreno: el modelo esta tabicando la pared a la maxima pendiente
+    # permitida.
+    #
+    # Y el VRM no lo atrapa, por diseno: sobre un plano inclinado el VRM es
+    # cero exactamente, por inclinado que este (ver METODO.md 3.2 bis).
+    # Separa "desordenado" de "inclinado" justamente para no excluir las
+    # cuestas empinadas pero caminables. Un farallon LISO lo pasa entero.
+    #
+    # El criterio es el de campo: se camina con dos pies, sin usar las
+    # manos. Por encima de unos 30 grados eso deja de ser cierto en terreno
+    # suelto. Medido sobre el corredor de Leimebamba, 30 grados es ademas lo
+    # mas bajo que la topografia tolera sin partirse -- la componente conexa
+    # mayor guarda el 97.4% de lo transitable a 30 grados, baja a 88.5% a
+    # 28 y se desploma a 61.2% a 25. Pon 90 para desactivarlo.
+    if cfg.pendiente_max_grados < 90:
+        n_antes = int(mascara.sum())
+        s_max = np.radians(cfg.pendiente_max_grados)
+        mascara &= ~(np.isfinite(S) & (S > s_max))
+        fuera = n_antes - int(mascara.sum())
+        # En grados y en radianes: el parametro se escribe en grados porque
+        # es como se discute, pero 'pendiente_rad.tif' esta en radianes y es
+        # con ese numero con el que se reclasifica en QGIS.
+        print(f"  pendiente > {cfg.pendiente_max_grados:g} grados "
+              f"({s_max:.4f} rad, {100 * np.tan(s_max):.0f}%) = no se camina "
+              f"con dos pies: {fuera} celdas fuera")
+        if fuera and not mascara.any():
+            raise SystemExit(
+                "La restriccion de pendiente dejo la mascara vacia.\n"
+                "Sube 'restricciones.pendiente_max_grados' en config.yaml.")
+        _avisa_si_se_partio(mascara)
+
     print("Hidrologia (el relleno de depresiones se usa SOLO aqui):")
     relleno = hidrologia.rellenar(dem, mascara)
     dirs = hidrologia.d8(relleno, res, valido=mascara)
@@ -187,7 +284,10 @@ def construir_superficies(cfg):
     preparar.escribe(cfg.dir_derivados / "pendiente_rad.tif", S, t, cfg.crs)
     preparar.escribe(cfg.dir_derivados / "rugosidad.tif", rug, t, cfg.crs)
     preparar.escribe(cfg.dir_derivados / "acumulacion.tif", acc, t, cfg.crs)
-    print(f"  mascara final: {int(mascara.sum())} celdas transitables")
+    n_salida = int(mascara.sum())
+    print(f"  mascara final: {n_salida} celdas transitables "
+          f"({n_entrada - n_salida} menos que el corredor, "
+          f"{100 * (n_entrada - n_salida) / max(n_entrada, 1):.1f}%)")
     return {"mascara": mascara}
 
 
@@ -255,6 +355,7 @@ def revisar_grafo(cfg):
     # sin volver a imprimir el aviso: `preparar.unidades` ya lo dio
     recortadas = {n for n, geom in uds
                   if preparar.recortada_por_la_caja(cfg, geom)}
+    origen = _origen_de_las_unidades(cfg)
 
     w = np.zeros(len(g.nombres))
     w[0] = 1.0
@@ -285,6 +386,7 @@ def revisar_grafo(cfg):
 
         fila = {
             "unidad": nombre,
+            "origen": origen.get(nombre, "registro"),
             "recortada_por_la_caja": nombre in recortadas,
             "nodos_vecindad": int(sub.n),
             "largo_observado_km": round(linea.length / 1000, 2),
@@ -308,8 +410,14 @@ def revisar_grafo(cfg):
             "giro_maximo_grados": round(metricas.giro_maximo(
                 np.asarray(linea.coords, dtype=np.float64)[:, :2]), 1),
             "franja_celdas": celdas,
+            # Dos cosas distintas que antes eran una sola, y por eso el
+            # aviso mandaba a subir el buffer cuando el buffer no tenia
+            # nada que ver (ver `metricas.toca_el_limite_de_busqueda`).
             "toca_borde_de_la_vecindad": bool(
-                metricas.toca_borde(sub.filcol[cam], vecindad)),
+                metricas.toca_el_limite_de_busqueda(
+                    xy, linea, cfg.buffer_corredor)),
+            "celdas_excluidas_que_roza": int(
+                metricas.roza_celdas_excluidas(sub.filcol[cam], vecindad)),
         }
         filas.append(fila)
         geoms.append({"unidad": nombre, "clase": "modelado",
@@ -366,7 +474,8 @@ def _tabla_revision(filas) -> None:
         print("     destino sino donde cortamos. Su D vale menos que la de")
         print("     una unidad completa.")
     if any(f["toca_borde_de_la_vecindad"] for f in filas):
-        print("\n  B  el camino modelado se pego al borde de su vecindad: es")
+        print("\n  B  el camino modelado llego al LIMITE del buffer de "
+              f"{cfg.buffer_corredor:.0f} m: es")
         print("     el buffer el que esta decidiendo, no el terreno. Sube")
         print("     'dominio.buffer_corredor' y vuelve a correr desde aqui.")
 
@@ -417,6 +526,29 @@ def _avisa_de_la_geometria(filas, cerca_m: float = 150.0,
     """
     avisos = []
     for f in filas:
+        # UN RECORRIDO GRABADO NO ESTA COSIDO POR NADIE.
+        #
+        # Esta comprobacion busca uniones espurias de `linemerge`: en el
+        # registro, la "pieza mayor" de un tramo con horquilla puede ser una
+        # rama de ida pegada a una de vuelta, y ajustar un costo contra eso no
+        # significa nada. Un track grabado no tiene ese problema: viene en
+        # orden de tiempo y cada vertice se piso de verdad.
+        #
+        # Y ahi una inversion de 176 grados es un DATO, no un defecto: la
+        # gente se devolvio. El circuito de Qoyllur Rit'i da justo eso, y sin
+        # esta salida el aviso suena en cada corrida sobre la unidad principal
+        # -- que es la peor manera de tener un aviso, porque se aprende a
+        # ignorarlo.
+        if f.get("origen") == "trayectoria":
+            if f["giro_maximo_grados"] > giro_max:
+                print(f"\n  {f['unidad'][:44]} se devuelve sobre si misma "
+                      f"({f['giro_maximo_grados']:.0f} grados de giro,")
+                print(f"  pasa a {f['autoproximidad_m']:.0f} m de si misma). "
+                      "En un recorrido grabado eso no es")
+                print("  un defecto de geometria: es parte del recorrido, y "
+                      "vale preguntarse donde")
+                print("  y por que se devolvio.")
+            continue
         motivos = []
         if f["autoproximidad_m"] < cerca_m:
             motivos.append(
@@ -438,6 +570,28 @@ def _avisa_de_la_geometria(filas, cerca_m: float = 150.0,
         print("    de ida y otra de vuelta. Miralo en QGIS antes de creerte")
         print("    su sinuosidad o su razon de costo.")
     return avisos
+
+
+def _origen_de_las_unidades(cfg) -> dict:
+    """De donde salio el camino de cada unidad: 'registro' o 'trayectoria'.
+
+    Varios diagnosticos solo tienen sentido para uno de los dos casos, y
+    hacerlos depender de la geometria seria adivinar. La columna la pone
+    `trayectoria.como_camino`.
+    """
+    import geopandas as gpd
+
+    ruta = cfg.dir_datos / "qn_geocam.gpkg"
+    if not ruta.exists():
+        return {}
+    try:
+        qn = gpd.read_file(ruta, layer="camino")
+    except Exception:
+        return {}
+    if "origen" not in qn.columns or "tramnomb" not in qn.columns:
+        return {}
+    return {str(k): str(v) for k, v in
+            zip(qn["tramnomb"], qn["origen"].fillna("registro"))}
 
 
 def _explica_corte(cfg, sub, costos, o, d, nombre) -> None:
@@ -1085,7 +1239,8 @@ def _figura_perfil(cfg, taus, perfiles):
     return ruta
 
 
-def costo_de_seguir_el_trazado(cfg, g, t6, geometria, w, o_xy, d_xy):
+def costo_de_seguir_el_trazado(cfg, g, t6, geometria, w, o_xy, d_xy,
+                               anchos=(2, 3, 5, 8)):
     """Costo del modelo a lo largo del trazado OBSERVADO.
 
     Es la pieza que faltaba para interpretar la distancia geometrica. Una
@@ -1119,7 +1274,7 @@ def costo_de_seguir_el_trazado(cfg, g, t6, geometria, w, o_xy, d_xy):
     # cada vertice en vez de una banda continua, y no conecta nunca.
     denso = LineString(preparar.vertices(geometria, paso=cfg.resolucion / 2))
 
-    for celdas in (2, 3, 5, 8):
+    for celdas in anchos:
         radio = celdas * cfg.resolucion
         nodos = g.nodos_cerca_de(denso, t6, radio)
         if len(nodos) < 2:
@@ -1133,3 +1288,109 @@ def costo_de_seguir_el_trazado(cfg, g, t6, geometria, w, o_xy, d_xy):
         if np.isfinite(dist[d]):
             return float(dist[d]), celdas
     return float("nan"), 0
+
+
+# ------------------------------------------- la razon de costo y su franja
+
+def razon_por_franja(cfg, anchos=(2, 3, 5, 8, 12)):
+    """La razon de costo de cada unidad, en funcion del ANCHO DE LA FRANJA.
+
+    `revisar` informa UNA razon por unidad, y lo hace con la franja mas
+    estrecha que logre conectar los dos extremos: empieza en 2 celdas y
+    ensancha solo si hace falta. Eso esta bien como numero unico, pero
+    esconde que el numero depende del ancho, y el ancho no es neutral.
+
+    Por que depende. La razon compara el costo de ir POR DONDE VA EL TRAZADO
+    con el optimo libre. "Por donde va el trazado" se calcula resolviendo el
+    optimo dentro de una franja alrededor de la linea observada, asi que:
+
+      - franja estrecha -> el camino esta obligado a seguir el trazado de
+        cerca, incluido su serpenteo, y la razon sale ALTA;
+      - franja ancha -> el camino puede cortar las curvas por dentro, se
+        parece cada vez mas al optimo libre, y la razon BAJA hacia 1.
+
+    O sea el ancho es la escala a la que se pregunta. Una razon alta con
+    franja ancha es un desvio de verdad: ni dandole 360 m de margen el
+    modelo encuentra como pasar por ahi barato. Una razon que se desploma al
+    ensanchar era serpenteo o un rodeo local.
+
+    Esto importa especialmente con trazados GRABADOS. Una linea del registro
+    viene digitalizada sobre imagen y es lisa; un track de GPS con un fix
+    cada 16 s y hdop 3 baila, y ese baile sube la razon sin que corresponda
+    a ninguna decision de quien caminaba. La tabla separa las dos cosas.
+
+    Y tambien avisa de lo contrario: si una unidad NO conecta con 2 celdas
+    pero si con 5, su razon de `revisar` se midio con una franja mas ancha
+    que las demas y es, por construccion, mas baja. Comparar esa con las
+    otras subestima su desvio.
+    """
+    import csv
+
+    g, t, uds = _carga_unidades(cfg)
+    w = np.zeros(len(g.nombres))
+    w[0] = 1.0
+
+    print(f"\n  La razon se mide resolviendo el optimo dentro de una franja")
+    print(f"  alrededor del trazado. Franja de n celdas = {cfg.resolucion:g}n "
+          "m de margen a cada lado.")
+
+    filas = []
+    for nombre, linea in uds:
+        from scipy.sparse.csgraph import dijkstra
+        sub, o, d, obs, t6 = _contexto(cfg, g, t, linea,
+                                       con_componentes=False)
+        dist = dijkstra(sub.costos(w), directed=True, indices=o)
+        opt = float(dist[d])
+        extremos = (np.array(linea.coords[0][:2]),
+                    np.array(linea.coords[-1][:2]))
+        fila = {"unidad": nombre, "largo_km": round(linea.length / 1000, 2),
+                "optimo": round(opt, 1)}
+        for n in anchos:
+            c, usado = costo_de_seguir_el_trazado(
+                cfg, g, t6, linea, w, extremos[0], extremos[1], anchos=(n,))
+            fila[f"razon_{n}"] = (round(c / opt, 3)
+                                  if usado and opt > 0 and np.isfinite(c)
+                                  else None)
+        filas.append(fila)
+
+    cab = "  ".join(f"{'f' + str(n):>7s}" for n in anchos)
+    print(f"\n  {'unidad':30s} {'km':>6s}   {cab}")
+    for f in filas:
+        vals = "  ".join(
+            ("      -" if f[f'razon_{n}'] is None
+             else f"{f[f'razon_{n}']:7.2f}") for n in anchos)
+        print(f"  {f['unidad'][:30]:30s} {f['largo_km']:6.2f}   {vals}")
+
+    print(f"\n  f{anchos[0]} es la franja mas estrecha; f{anchos[-1]} da "
+          f"{cfg.resolucion * anchos[-1]:.0f} m de margen a cada lado.")
+    print("  Un '-' quiere decir que con esa franja los extremos no se")
+    print("  conectan: el trazado roza celda enmascarada o pasa entre dos.")
+
+    estables, blandas = [], []
+    for f in filas:
+        v = [f[f"razon_{n}"] for n in anchos if f[f"razon_{n}"] is not None]
+        if len(v) >= 2:
+            caida = (v[0] - v[-1]) / v[0] if v[0] else 0.0
+            (blandas if caida > 0.20 else estables).append(
+                (f["unidad"], v[0], v[-1], caida))
+    if estables:
+        print("\n  AGUANTAN el ensanchado (menos de 20% de caida): el desvio")
+        print("  es del recorrido y no de la escala.")
+        for n, a, b, c in sorted(estables, key=lambda r: -r[2]):
+            print(f"    {n[:34]:36s} {a:5.2f} -> {b:5.2f}  "
+                  f"({100*c:+5.1f}%)")
+    if blandas:
+        print("\n  SE DESPLOMAN al ensanchar: ahi la razon alta era serpenteo")
+        print("  del trazado o un rodeo local, no un desvio sostenido.")
+        for n, a, b, c in sorted(blandas, key=lambda r: -r[3]):
+            print(f"    {n[:34]:36s} {a:5.2f} -> {b:5.2f}  "
+                  f"({100*c:+5.1f}%)")
+
+    destino = cfg.dir_resultados / "razon_por_franja.csv"
+    with open(destino, "w", newline="", encoding="utf-8") as fh:
+        wr = csv.DictWriter(fh, fieldnames=list(filas[0].keys()))
+        wr.writeheader()
+        wr.writerows(filas)
+    print(f"\n  -> {destino.relative_to(cfg.raiz)}")
+    _guarda_json(cfg, "razon_por_franja.json", filas)
+    return filas

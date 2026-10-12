@@ -172,6 +172,27 @@ def lineas_unidas(camino):
     # toma el tercero como array de salida, y restarle un punto 2D a uno 3D
     # falla al difundir. La altura ya esta en el DEM; en la geometria estorba.
     geoms = [force_2d(g) for g in geoms]
+
+    # UN RECORRIDO GRABADO NO SE UNE: ya viene unido, y en orden de tiempo.
+    #
+    # `unary_union` parte una polilinea en sus AUTOINTERSECCIONES. Para el
+    # registro eso esta bien -- los rasgos llegan sueltos y hay que coserlos--
+    # pero un recorrido que vuelve a pasar por un sitio no es un error, es un
+    # recorrido, y partirlo ahi pierde medio trecho: en el circuito de Qoyllur
+    # Rit'i convertia 20.5 km en 13.2 sin decir nada, porque la vuelta toca el
+    # punto por el que se paso de ida.
+    #
+    # Se mira la columna 'origen' y no la geometria: distinguirlo por si la
+    # linea es simple cambiaria tambien el camino del registro, y ese no se
+    # toca. `trayectoria.como_camino` la pone.
+    if "origen" in getattr(camino, "columns", []) and \
+            (camino["origen"] == "trayectoria").all():
+        piezas = []
+        for g in geoms:
+            piezas.extend(list(g.geoms)
+                          if g.geom_type == "MultiLineString" else [g])
+        return sorted(piezas, key=lambda g: g.length, reverse=True)
+
     u = unary_union(geoms)
     unido = linemerge(u) if u.geom_type != "LineString" else u
     piezas = list(unido.geoms) if unido.geom_type == "MultiLineString" else [unido]
@@ -251,7 +272,31 @@ def unidades(cfg, camino):
 
     from . import registro
 
-    salida, avisos = [], []
+    def _parecido(s: str) -> str:
+        """El nombre sin espacios, guiones, tildes ni mayusculas.
+
+        Solo para SUGERIR en el aviso de nombre no encontrado: asi
+        'Lajalca - Mendoza' se parece a 'La Jalca - Mendoza'. No se usa para
+        decidir nada: la omision sigue siendo por nombre exacto.
+        """
+        import unicodedata
+        s = unicodedata.normalize("NFKD", str(s).lower())
+        s = "".join(c for c in s if not unicodedata.combining(c))
+        return "".join(c for c in s if c.isalnum())
+
+    # Tramos REALES que se dejan fuera por decision del estudio. No es lo
+    # mismo que 'tramos_excluidos', que son etiquetas del registro que no
+    # nombran un tramo ("En proceso", el nombre vacio) y se quitan del
+    # registro entero. Estos SI son tramos: entran al registro, se miden y
+    # se dibujan, pero no se usan como unidad de ajuste.
+    #
+    # El motivo en Leimebamba es de campo: son recorridos demasiado largos
+    # para la prospeccion pedestre prevista. Queda escrito aqui y se imprime
+    # en cada corrida, para que nadie compare un barrido de cuatro unidades
+    # con uno de seis sin darse cuenta.
+    omitidos = {n for n in cfg.tramos_omitidos if n}
+
+    salida, avisos, fuera = [], [], []
     for nombre, g in camino.groupby(camino["tramnomb"].fillna("(sin nombre)")):
         try:
             piezas = lineas_unidas(g)
@@ -259,6 +304,9 @@ def unidades(cfg, camino):
             continue
         mayor = piezas[0]
         if mayor.length >= cfg.largo_min_unidad:
+            if str(nombre) in omitidos:
+                fuera.append((str(nombre), mayor.length))
+                continue
             salida.append((str(nombre), mayor))
             # Una etiqueta del registro con suficiente linea dentro de la
             # caja entraria al analisis como si fuera un camino, y sus pesos
@@ -268,11 +316,37 @@ def unidades(cfg, camino):
             if aviso:
                 avisos.append(aviso)
 
+    if fuera:
+        print("\n  Tramos OMITIDOS por 'datos.tramos_omitidos' (son tramos de "
+              "verdad; se dejan fuera del ajuste):")
+        for nombre, largo in sorted(fuera, key=lambda x: -x[1]):
+            print(f"    {nombre}: {largo / 1000:.1f} km continuos")
+
+    # UN NOMBRE MAL ESCRITO NO DA ERROR: simplemente no omite nada, y eso no
+    # se nota al mirar la salida. Paso real: el registro escribe "La Jalca -
+    # Mendoza" con espacio y el config decia "Lajalca - Mendoza", asi que la
+    # omision no hacia nada y el tramo seguia entrando al barrido.
+    sin_usar = omitidos - {n for n, _ in fuera}
+    if sin_usar:
+        hay = sorted({str(n) for n in camino["tramnomb"].dropna().unique()})
+        print("\n  AVISO: estos nombres de 'datos.tramos_omitidos' no "
+              "coinciden con ningun tramo del registro:")
+        for n in sorted(sin_usar):
+            parecidos = [h for h in hay
+                         if _parecido(n) and _parecido(n) in _parecido(h)]
+            pista = f"  quiza: {parecidos[0]!r}" if parecidos else ""
+            print(f"    {n!r} no existe.{pista}")
+        print("  No se omitio nada por ellos. Los nombres van exactos.")
+
     if not salida:
+        pistas = ("Baja 'largo_min_unidad' en config.yaml, o usa "
+                  "'unidad: sector'.")
+        if fuera:
+            pistas = ("Los unicos que llegaban estan en "
+                      "'datos.tramos_omitidos'.\n" + pistas)
         raise SystemExit(
             f"Ningun tramo llega a {cfg.largo_min_unidad / 1000:.1f} km "
-            "continuos.\nBaja 'largo_min_unidad' en config.yaml, o usa "
-            "'unidad: sector'.")
+            f"continuos.\n{pistas}")
     if avisos:
         print("\n  AVISO: estas unidades parecen ETIQUETAS del registro y no "
               "tramos:")

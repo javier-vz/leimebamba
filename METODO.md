@@ -288,6 +288,51 @@ de referencia simplemente porque le cambia por dónde se puede ir, y la
 comparación no diría nada sobre el espacio ceremonial. Se desactiva poniendo
 `rugosidad_percentil: 100`.
 
+### 3.2 ter Caminabilidad: la pendiente del terreno, que no es la del paso
+
+El VRM deja pasar los farallones **lisos**, y eso no es un descuido: es su
+definición. Sobre un plano inclinado el VRM vale cero exactamente, por
+inclinado que esté. Hace falta entonces una segunda restricción, sobre la
+pendiente misma:
+
+$$
+\text{celda transitable} \iff S \le S_{\max}, \qquad S_{\max} = 30°
+$$
+
+**No es lo mismo que $g_{\max}$, y hacen falta las dos.** $g_{\max}$ limita el
+gradiente de cada *arista*; $S_{\max}$ limita la pendiente de la *celda*. Sin
+la segunda, sobre una cara del 100% siempre existe una dirección oblicua cuyo
+gradiente queda por debajo de $g_{\max} = 0.45$ —basta cruzarla en diagonal— y
+el grafo la ofrece. El camino de mínimo costo sube entonces el farallón
+zigzagueando, y esos zigzags no están en el terreno: son el modelo tabicando
+la pared a la máxima pendiente permitida.
+
+El criterio es de campo y no del modelo: **se camina con dos pies, sin usar
+las manos**. Por encima de unos 30° (58%) eso deja de ser cierto en terreno
+suelto, y una ruta que pase por ahí no sirve para prospección pedestre por
+barata que la encuentre el modelo.
+
+El valor de 30° tampoco es un redondeo. La restricción quita celdas, y quitar
+celdas puede **partir** el corredor: no es lo mismo perder superficie que
+perder conectividad. Medido sobre el corredor de Leimebamba:
+
+| $S_{\max}$ | queda transitable | componente mayor |
+|---|---|---|
+| sin restricción | 100% | 99.92% |
+| 40° | 93.8% | 99.41% |
+| 35° | 87.8% | 98.62% |
+| **30°** | **78.6%** | **97.44%** |
+| 28° | 73.8% | 88.51% |
+| 25° | 65.7% | 61.16% |
+
+La transición es brusca entre 30° y 25°: a 30° el corredor aguanta, a 25° se
+rompe en trozos que no se comunican y los caminos entre unidades de trozos
+distintos dejan de existir. Así que 30° es a la vez el número correcto por
+caminabilidad y el más bajo que esta topografía tolera. El paso `superficies`
+imprime esa fracción en cada corrida y avisa si baja del 95%.
+
+Se desactiva poniendo `pendiente_max_grados: 90`.
+
 ### 3.3 bis Agua: drenaje y anegamiento
 
 Aquí sí, y **sólo aquí**, el DEM rellenado. Rellenar depresiones borra
@@ -700,6 +745,108 @@ El piso es $1/(M+1)$: con $M = 500$ **no se puede reportar «$p < 0.002$»**, se
 reporta «$p = 0.002$ con $M = 500$».
 
 Código: `camino/nulos.py`.
+
+## 8 bis ter. Trayectorias observadas: el camino con reloj
+
+Todo lo anterior trata el camino observado como una **línea**: tiene forma y
+no tiene tiempo, así que de ella sólo se puede preguntar por dónde va. Un
+track grabado trae las dos cosas, y eso cambia la pregunta: se puede
+preguntar también cuándo se pasó por cada parte y dónde se estuvo quieto.
+
+La magnitud central es la **fracción de tiempo en permanencia**
+
+$$\phi \;=\; \frac{1}{T}\sum_{k} \bigl(t_{b_k} - t_{a_k}\bigr),$$
+
+donde $[a_k, b_k]$ son los intervalos de parada y $T$ el tiempo total con
+grabación. Importa porque una ruta de mínimo costo **no tiene reloj**: es la
+curva que minimiza $\int C\,\mathrm{d}s$, y en ella $\phi = 0$ por
+construcción. Un recorrido con $\phi$ grande no puede ser el resultado de
+minimizar un costo de desplazamiento, por más componentes que se le agreguen
+a $C$.
+
+### Cómo se separa marcha de permanencia
+
+**No con un umbral al desplazamiento.** Con 16 s entre fijaciones, un
+receptor quieto produce posiciones que bailan dentro de su propia precisión
+—con $\mathrm{hdop}$ mediano 3, varios metros—, así que un umbral por debajo
+de ese ruido clasifica las paradas como marcha y uno por encima se come la
+marcha lenta.
+
+Se usan dos criterios independientes y se informa su **unión**:
+
+1. **Lo que declara el receptor.** OsmAnd escribe en cada punto su propia
+   estimación de velocidad, derivada del Doppler del GNSS y no de diferenciar
+   posiciones, así que no arrastra el ruido posicional. Cuando decide que el
+   portador está quieto congela la fijación y omite la etiqueta: ausencia de
+   `<osmand:speed>` se lee como cero.
+
+2. **La dispersión en una ventana temporal.** Una parada es un intervalo
+   maximal cuyas fijaciones caben todas en un círculo de radio $R$ y que dura
+   al menos $T_{\min}$. Es robusto al baile porque el ruido no se acumula: un
+   receptor quieto permanece en el círculo por mucho que se espere, mientras
+   que con $R = 20$ m y $T_{\min} = 120$ s alguien que avanza a 0.25 m/s
+   recorre 30 m y queda clasificado como marcha.
+
+La unión y no la intersección: cada criterio detecta un modo de estar quieto
+que el otro pierde. El del aparato ve la detención real aunque la posición
+baile; el de dispersión ve el desplazarse despacio dentro de una estación,
+que el aparato puede dar como marcha.
+
+El borde de una parada por dispersión queda difuso en del orden de un radio
+—la última fijación de marcha antes de llegar ya está dentro del círculo—,
+lo que alarga las paradas unos segundos. Para $\phi$, con paradas de
+minutos, es despreciable; para medir la duración de una parada concreta, no.
+
+### $\phi$ depende de $R$ y de $T_{\min}$, y por eso se informa el barrido
+
+En los doce tracks de Qoyllur Rit'i (2026), $\phi$ va de **0.105** a
+**0.708** según el criterio y los parámetros: 0.105–0.146 con el criterio
+del aparato, 0.398–0.688 con el de dispersión. Decir «la mitad del tiempo
+parado» sin decir cómo se definió una parada no es un resultado.
+
+Lo que **no** se mueve con los parámetros es el orden entre tramos, y es eso
+lo que sostiene cualquier comparación interna del recorrido. El paso imprime
+la tabla completa junto al resultado, igual que `sensibilidad` hace con los
+cortes por sector.
+
+### El modo de viaje sale de los datos
+
+Parte del recorrido actual se hace en camión, y mezclar los dos modos vuelve
+ininteligible la relación velocidad–pendiente. La clasificación usa el
+percentil 95 de la velocidad **durante la marcha** —no de la traza entera,
+porque un camión detenido tiene mediana cero igual que un peregrino
+sentado—. En estos tracks ese percentil da 0.9–1.8 m/s en los ocho tramos a
+pie y 10.3–14.0 m/s en los cuatro en vehículo: el umbral de 4 m/s cae en un
+hueco de casi un orden de magnitud.
+
+### La velocidad se mide sobre paso de distancia fija
+
+Si la pendiente se calcula como $g = \Delta z / d$ con $d = v\,\Delta t$ y
+$\Delta t$ constante, entonces $d \propto v$ y cualquier ruido en $\Delta z$
+produce $|g|$ grande justo donde $v$ es pequeña: **la correlación
+velocidad–pendiente aparece por aritmética**. Remuestrear el perfil a paso de
+distancia fija deja la distancia fuera del numerador y del denominador a la
+vez.
+
+Esto no es hipotético: con paso temporal, la correlación de Spearman entre
+el costo de Minetti y la velocidad mediana por clase de pendiente daba
+$-0.80$ en una primera versión de este análisis, y ese valor era además
+producto de correlacionar **medianas agrupadas** en lugar de los datos.
+Punto a punto y con paso de 30 m, el valor es $-0.32$.
+
+El remuestreo exige además que el paso supere la distancia entre fijaciones;
+a 13 m/s y 16 s hay 200 m de una a la siguiente, y un paso de 30 m
+interpolaría detalle no medido. El paso lo avisa cuando ocurre.
+
+### La pendiente de aquí es provisional
+
+Mientras no haya DEM, la pendiente sale del perfil del propio receptor, con
+ruido de orden del metro: sobre un paso de 30 m son unos 3 puntos de
+pendiente. Sirve para mirar, no para publicar. La función devuelve las
+coordenadas de cada paso precisamente para que, con el raster disponible, la
+pendiente se tome del DEM.
+
+Código: `camino/trayectoria.py`. Paso: `python -m camino trayectorias`.
 
 ## 8 bis. Qué cuenta como camino observado
 

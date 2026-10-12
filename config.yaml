@@ -8,7 +8,7 @@
 
 # La version del paquete con la que se escribio este archivo. Si no coincide
 # con la del programa, se avisa: puede que haya parametros nuevos.
-version: "0.20.0"
+version: "0.22.0"
 
 extension:
   # LA CAJA DEL ESTUDIO, decidida con `python -m camino caja` el 5-oct-2026.
@@ -103,6 +103,27 @@ datos:
     - "En proceso"
     - "En Proceso"
 
+  # --- tramos REALES que se dejan fuera del ajuste ---
+  # No confundir con 'tramos_excluidos', que son etiquetas que no nombran un
+  # tramo. Estos si son tramos: entran al registro, se miden y se dibujan,
+  # pero no se usan como unidad para estimar pesos.
+  #
+  # El motivo aqui es de campo, no de modelo: el trabajo es prospeccion
+  # PEDESTRE y estos dos recorridos son demasiado largos para hacerlos a pie
+  # en la campana prevista. La decision es de la arqueologa y queda escrita.
+  # Quita un nombre de esta lista y vuelve a entrar, sin tocar nada mas.
+  #
+  # Cada corrida imprime cuales omitio, para que nadie compare un barrido de
+  # cuatro unidades con uno de seis sin darse cuenta.
+  # Los nombres van EXACTOS como los escribe el registro. Comprobados contra
+  # datos/qhapaq_nan.kmz el 11-oct-2026: el registro dice "La Jalca" con
+  # espacio, no "Lajalca". Un nombre mal escrito aqui no da error, solo deja
+  # de omitir, y eso no se nota. Si no estas seguro de como se llama,
+  # `python -m camino ruta` lista los nombres que hay en la caja.
+  tramos_omitidos:
+    - "Pauja - Santa Cruz"
+    - "La Jalca - Mendoza"
+
   # --- alternativa, solo si el WFS no responde ---
   # Capa de ArcGIS REST, sin el /query final. README, paso 3, opcion C.
   geocam_servicio: ""
@@ -159,9 +180,49 @@ costo:
 # distingue "por aqui no se pasa" de "por aqui es caro pasar".
 restricciones:
   # Percentil de rugosidad (VRM) por encima del cual una celda se considera
-  # intransitable: farallones rocosos y terreno desmoronado. 99 deja fuera
-  # el 1% mas roto del corredor. Pon 100 para desactivarlo.
+  # intransitable: terreno desmoronado y quebrado. 99 deja fuera el 1% mas
+  # roto del corredor. Pon 100 para desactivarlo.
+  #
+  # OJO con lo que el VRM NO hace: sobre un plano inclinado vale cero
+  # exactamente, por inclinado que este. Separa "desordenado" de
+  # "inclinado", a proposito, para no excluir las cuestas empinadas pero
+  # caminables. Un farallon LISO lo pasa entero. Para eso esta el parametro
+  # de abajo.
   rugosidad_percentil: 99.0
+
+  # CAMINABILIDAD: pendiente maxima del TERRENO, en grados.
+  #
+  # El criterio es el de campo: se camina con dos pies, sin usar las manos.
+  # Por encima de unos 30 grados (58%) eso deja de ser cierto en terreno
+  # suelto, y una ruta que pase por ahi no sirve para prospeccion pedestre
+  # por mucho que el modelo la encuentre barata.
+  #
+  # Es distinto de 'costo.g_max', y hacen falta los dos. 'g_max' limita el
+  # gradiente de cada PASO; esto limita la pendiente de la CELDA. Sin esto,
+  # sobre una cara del 100% el modelo encuentra siempre una diagonal con
+  # gradiente bajo g_max y sube el farallon zigzagueando: son zigzags que no
+  # existen en el terreno, el modelo tabicando la pared.
+  #
+  # El 30 no es redondeo. Medido sobre este corredor, la componente conexa
+  # mayor guarda el 97.4% de lo transitable a 30 grados, baja al 88.5% a 28
+  # y se desploma al 61.2% a 25: por debajo de 30 el corredor se parte en
+  # trozos que no se comunican. Cada corrida imprime esa fraccion.
+  #
+  # Los dos valores que importan, para cotejar en QGIS contra
+  # 'derivados/pendiente_rad.tif', que esta en RADIANES:
+  #
+  #     35 grados = 0.6109 rad = 70%   por encima, el desplazamiento bipedo
+  #                                    sobre tierra es inviable  <- por omision
+  #     30 grados = 0.5236 rad = 58%   limite de marcha comoda; mas estricto
+  #
+  # El valor por omision es 35 porque es el criterio fisico: por encima de
+  # ahi no se sube sin manos. Bajarlo a 30 es defendible si lo que se quiere
+  # es marcha comoda y no marcha posible, pero cuesta: deja fuera un 9% mas
+  # del corredor, y ese 9% incluye terreno por el que el camino real podria
+  # ir. Para prospeccion conviene no excluir de mas.
+  #
+  # Pon 90 para desactivarlo.
+  pendiente_max_grados: 35.0
 
   # Area minima, en m2, para que una laguna se considere infranqueable.
   area_min_laguna: 50000
@@ -172,7 +233,9 @@ restricciones:
 ceremonial:
   # Archivo con los espacios ceremoniales documentados. Si se deja vacio,
   # se busca en datos/ un archivo cuyo nombre empiece por "sitios".
-  archivo: ""
+  archivo: "datos/sitios_mc.gpkg"     # estaba ""
+
+  tramos_omitidos: []                  # los nombres viejos ya no existen
 
   # Distancia, en metros, por encima de la cual da igual estar mas lejos.
   # La componente satura ahi, para que un sitio aislado no domine la
@@ -252,7 +315,7 @@ barrido:
   # Largo continuo minimo, en metros, para que un tramo entre al analisis.
   # Por debajo de ~8 km el camino de minimo costo tiene poco margen de
   # maniobra y casi cualquier juego de pesos da lo mismo.
-  largo_min_unidad: 8000
+  largo_min_unidad: 100
 
   # Sectores en que se parte el camino registrado. Solo se usa con
   # 'unidad: sector'.
@@ -293,3 +356,38 @@ barrido:
 
   semilla: 20261005
   n_trabajos: -1           # -1 = todos los nucleos
+
+# --- trayectorias observadas (paso 'trayectorias') ---
+# Tracks grabados con sello de tiempo, en datos/trayectorias/*.gpx. Esto NO
+# es el registro: el registro entra por 'ruta' y no tiene tiempo.
+trayectorias:
+  # Radio del circulo que tiene que contener todos los fixes de una parada.
+  # Varias veces el error horizontal tipico. Con hdop mediano 3 y unos 5 m
+  # por unidad de hdop, el error esperable ronda los 15 m.
+  radio_parada: 20.0
+
+  # Duracion minima para que un intervalo quieto cuente como parada. Por
+  # debajo de dos minutos es atarse un cordon, no una estacion.
+  min_parada_s: 120.0
+
+  # 'aparato' (la velocidad que declara el receptor, via Doppler),
+  # 'dispersion' (el circulo de radio_parada), o 'ambos' = la union.
+  # La union y no la interseccion: cada criterio ve un modo de estar quieto
+  # que el otro se pierde. El paso imprime los tres por separado.
+  criterio: ambos
+
+  # Paso del remuestreo, en metros. La celda del DEM, para que la pendiente
+  # de aqui y la del raster hablen de la misma escala. Y paso de DISTANCIA y
+  # no de tiempo: con paso de tiempo la distancia es proporcional a la
+  # velocidad y la relacion velocidad-pendiente sale por aritmetica.
+  paso: 30.0
+
+  # Hueco de grabacion que parte la traza. Ese tiempo no se cuenta ni como
+  # marcha ni como permanencia: se informa aparte.
+  hueco_s: 300.0
+
+  # Velocidad por encima de la cual la traza no es de alguien caminando. En
+  # los tracks de Qoyllur Rit'i el percentil 95 durante la marcha da 0.9-1.8
+  # m/s a pie y 10.3-14.0 en camion: el umbral cae en un hueco de casi un
+  # orden de magnitud y la clasificacion no es sensible a donde se ponga.
+  v_max_a_pie: 4.0

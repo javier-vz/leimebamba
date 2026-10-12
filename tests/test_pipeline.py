@@ -499,3 +499,85 @@ def test_resultados_dice_que_falta_el_barrido(tmp_path, corrido):
     cfg = dataclasses.replace(corrido["cfg"], raiz=tmp_path)
     with pytest.raises(SystemExit, match="el barrido no ha terminado"):
         pipeline.resultados(cfg)
+
+
+# ------------------------------- caminabilidad: la pendiente del TERRENO
+
+def _proyecto_con_farallon(tmp_path, pendiente_max):
+    """Un proyecto minimo cuyo DEM tiene una pared, para probar la mascara.
+
+    La pared es lisa a proposito: es el caso que el VRM NO atrapa, porque
+    sobre un plano inclinado el VRM vale cero por inclinado que este.
+    """
+    import copy
+    d = copy.deepcopy(CONFIG_PRUEBA)
+    d["restricciones"]["pendiente_max_grados"] = pendiente_max
+    with open(tmp_path / "config.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(d, f)
+    cfg = config.Config.cargar(tmp_path / "config.yaml")
+
+    t, ancho, alto = preparar.rejilla(cfg)
+    # Mitad llana, mitad pared lisa de 45 grados (1 m de subida por metro).
+    f_, c_ = np.mgrid[0:alto, 0:ancho]
+    dem = np.where(c_ < ancho // 2, 2600.0, 2600.0 + 30.0 * (c_ - ancho // 2))
+    for nombre in ("cop30.tif", "aw3d30.tif"):
+        preparar.escribe(cfg.dir_derivados / nombre, dem, t, cfg.crs)
+    preparar.escribe(cfg.dir_derivados / "mascara.tif",
+                     np.ones_like(dem, dtype=np.float32), t, cfg.crs, nodata=0)
+    return cfg
+
+
+def test_la_pendiente_maxima_quita_el_farallon_liso(tmp_path):
+    """El VRM lo deja pasar; esta restriccion no."""
+    cfg = _proyecto_con_farallon(tmp_path, pendiente_max=30.0)
+    m = pipeline.construir_superficies(cfg)["mascara"]
+    ancho = m.shape[1]
+    assert m[:, 2:ancho // 2 - 2].all()        # lo llano se queda entero
+    assert not m[:, ancho // 2 + 2:-2].any()   # la pared se va entera
+
+
+def test_desactivar_la_pendiente_maxima_deja_pasar_el_farallon(tmp_path):
+    """Con 90 grados la restriccion no hace nada: es el comportamiento viejo."""
+    cfg = _proyecto_con_farallon(tmp_path, pendiente_max=90.0)
+    m = pipeline.construir_superficies(cfg)["mascara"]
+    ancho = m.shape[1]
+    assert m[:, ancho // 2 + 2:-2].any()
+
+
+def test_la_pendiente_maxima_se_dice_en_la_salida(tmp_path, capsys):
+    cfg = _proyecto_con_farallon(tmp_path, pendiente_max=30.0)
+    pipeline.construir_superficies(cfg)
+    salida = capsys.readouterr().out
+    assert "dos pies" in salida
+    assert "conectividad" in salida
+
+
+# --------------------------------------------- el aviso de fragmentacion
+
+def test_la_conectividad_es_uno_cuando_todo_esta_pegado():
+    m = np.ones((20, 20), dtype=bool)
+    assert pipeline._avisa_si_se_partio(m) == pytest.approx(1.0)
+
+
+def test_la_conectividad_detecta_dos_mitades_incomunicadas(capsys):
+    """Dos bloques iguales separados por una franja vacia: 50% cada uno."""
+    m = np.zeros((20, 21), dtype=bool)
+    m[:, :10] = True
+    m[:, 11:] = True
+    frac = pipeline._avisa_si_se_partio(m)
+    assert frac == pytest.approx(0.5)
+    assert "AVISO" in capsys.readouterr().out
+
+
+def test_la_conectividad_no_avisa_por_una_isla_chica(capsys):
+    """Perder superficie no es perder conectividad: eso es lo que mide."""
+    m = np.zeros((40, 40), dtype=bool)
+    m[:, :38] = True
+    m[0, 39] = True            # una celda suelta
+    frac = pipeline._avisa_si_se_partio(m)
+    assert frac > 0.99
+    assert "AVISO" not in capsys.readouterr().out
+
+
+def test_la_conectividad_de_una_mascara_vacia_es_cero():
+    assert pipeline._avisa_si_se_partio(np.zeros((5, 5), bool)) == 0.0
