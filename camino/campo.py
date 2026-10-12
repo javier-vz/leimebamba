@@ -166,7 +166,7 @@ def mide_zonas(cfg, rev, unidades=None) -> list[dict]:
                 "razon_local": round(float(c_obs / c_opt), 3) if c_opt else
                 float("nan"),
                 "_obs": obs, "_mod": mod, "_a": a, "_b": b, "_trozo": trozo,
-                "_alterna": alterna,
+                "_alterna": alterna, "_crs": rev.crs,
             })
     return filas
 
@@ -232,11 +232,104 @@ def estaciones(objetivos, dem=None) -> list[dict]:
     return salida
 
 
-def escribe_gpx(puntos, destino: pathlib.Path) -> None:
-    """Un waypoint por estacion, con su tipo y su instruccion en la nota.
+def jornada(objetivo, dem=None) -> dict:
+    """Lo que cuesta ANDAR una zona, que es lo que decide cuantos dias son.
 
-    La nota importa: un waypoint sin ella es un punto al que se llega sin
-    saber que mirar, y eso en campo es un dia perdido.
+    La distancia desde la base no es el problema: en la sierra el dia se va
+    caminando, no manejando. Lo que decide es el recorrido sobre el camino
+    (con su desnivel) y cuanto hay que SALIRSE de el para llegar a las
+    estaciones B, que es la parte sin sendero.
+    """
+    from shapely.ops import substring
+
+    obs, trozo = objetivo["_obs"], objetivo["_trozo"]
+    s = sorted(obs.project(p) for p in (objetivo["_a"], objetivo["_b"]))
+    camino = substring(obs, s[0], s[1])
+
+    sube = baja = 0.0
+    if dem is not None and camino.length > 0:
+        n = max(int(camino.length // PASO_M) + 1, 2)
+        pts = [camino.interpolate(float(x))
+               for x in np.linspace(0, camino.length, n)]
+        h = np.array([v[0] for v in dem.sample([(p.x, p.y) for p in pts], 1)],
+                     dtype=float)
+        h[h < -1000] = np.nan
+        d = np.diff(h)
+        sube, baja = float(np.nansum(d[d > 0])), -float(np.nansum(d[d < 0]))
+
+    fuera = []
+    if objetivo["_alterna"].length > 0:
+        for x in FRACCIONES:
+            fuera.append(objetivo["_alterna"].interpolate(
+                x, normalized=True).distance(obs) / 1000)
+
+    return {
+        "km_camino": round(camino.length / 1000, 1),
+        "subida_m": round(sube), "bajada_m": round(baja),
+        "fuera_del_camino_km": [round(x, 1) for x in sorted(fuera)],
+        # ida y vuelta a cada B desde el camino: es la parte sin sendero
+        "km_fuera_ida_y_vuelta": round(2 * sum(fuera), 1),
+        "km_a_pie": round(camino.length / 1000 + 2 * sum(fuera), 1),
+    }
+
+
+def dias(j: dict, km_por_dia: float = 14.0,
+         subida_por_dia: float = 1200.0) -> int:
+    """Cuantos dias pide una zona, por distancia y por desnivel.
+
+    Los dos topes son conservadores a proposito y valen para una jornada de
+    trabajo, no de marcha: en cada estacion hay que medir, fotografiar y
+    anotar, y las B se hacen campo traviesa. Una zona que pide dos dias y se
+    intenta en uno acaba con las estaciones B sin hacer, que son justamente
+    las que pueden cambiar el resultado.
+    """
+    return max(1, int(np.ceil(max(j["km_a_pie"] / km_por_dia,
+                                  j["subida_m"] / subida_por_dia))))
+
+
+def _tabla_de_jornadas(objetivos, dem=None) -> list[dict]:
+    """Lo que hace falta para planificar los dias, zona por zona."""
+    filas = []
+    print("\n  --- lo que cuesta andar cada zona ---")
+    print(f"  {'zona':30s} {'camino':>7s} {'subida':>7s} {'fuera':>7s} "
+          f"{'a pie':>7s} {'dias':>5s}")
+    for f in objetivos:
+        j = jornada(f, dem)
+        n = dias(j)
+        filas.append({"tramo": f["tramo"], "zona": f["zona"],
+                      "prioridad": f["prioridad"], **j, "dias": n})
+        print(f"  {f['tramo'][:30]:30s} {j['km_camino']:6.1f}k "
+              f"{j['subida_m']:6d}m {j['km_fuera_ida_y_vuelta']:6.1f}k "
+              f"{j['km_a_pie']:6.1f}k {n:5d}")
+    print("\n  camino  km del camino registrado entre las dos estaciones C.")
+    print("  subida  desnivel acumulado de subida en ese recorrido.")
+    print("  fuera   km de ida y vuelta para llegar a las tres estaciones B,")
+    print("          que estan sobre la ruta del modelo y no sobre el camino.")
+    print("  a pie   la suma. Es lo que decide cuantos dias, no la distancia")
+    print("          desde la base.")
+    total = sum(f["dias"] for f in filas)
+    print(f"\n  Las {len(filas)} zonas piden {total} dias de campo.")
+    return filas
+
+
+# Simbolos de Garmin por tipo de estacion. Los nombres son los del estandar
+# de Garmin, que el aparato dibuja en pantalla: ver las B de otro color es lo
+# que evita saltarselas, que son las que deciden.
+SIMBOLO = {"A": "Flag, Blue", "B": "Flag, Red", "C": "Pin, Green"}
+
+
+def escribe_gpx(puntos, destino: pathlib.Path, rutas=None) -> None:
+    """GPX con los waypoints y, si se dan, las rutas como tracks.
+
+    Pensado para un Garmin de mano, no para un visor de escritorio:
+
+    - `name` corto, porque el aparato lo trunca a una docena de caracteres.
+    - `cmt` corto y `desc` largo: en pantalla sale el comentario, y la
+      instruccion completa queda para cuando se descargue.
+    - `sym` por tipo, para distinguir de un vistazo las estaciones B.
+    - Y las LINEAS como tracks. Un waypoint suelto no sirve el dia que hay
+      que cruzar campo traviesa: lo que hace falta es ver por donde va la
+      ruta, y eso es un track.
     """
     ET.register_namespace("", "http://www.topografix.com/GPX/1/1")
     raiz = ET.Element("{http://www.topografix.com/GPX/1/1}gpx",
@@ -247,11 +340,48 @@ def escribe_gpx(puntos, destino: pathlib.Path) -> None:
         ET.SubElement(wpt, "name").text = p["codigo"]
         if p.get("altitud_m") is not None:
             ET.SubElement(wpt, "ele").text = str(p["altitud_m"])
+        ET.SubElement(wpt, "cmt").text = (
+            f"{p['tipo']} dia {p['prioridad']} - {_corto(p['tipo'])}")
         ET.SubElement(wpt, "desc").text = (
-            f"TIPO {p['tipo']} | prioridad {p['prioridad']} | {p['tramo']} | "
+            f"TIPO {p['tipo']} | dia {p['prioridad']} | {p['tramo']} | "
             f"{p['nota']} | {QUE_HACER[p['tipo']]}")
+        ET.SubElement(wpt, "sym").text = SIMBOLO.get(p["tipo"], "Waypoint")
+
+    for nombre, linea in (rutas or []):
+        trk = ET.SubElement(raiz, "trk")
+        ET.SubElement(trk, "name").text = nombre
+        seg = ET.SubElement(trk, "trkseg")
+        for x, y in linea.coords:
+            ET.SubElement(seg, "trkpt", {"lat": f"{y:.6f}", "lon": f"{x:.6f}"})
+
     ET.ElementTree(raiz).write(destino, encoding="UTF-8",
                                xml_declaration=True)
+
+
+def _corto(tipo: str) -> str:
+    return {"A": "camino registrado",
+            "B": "BUSCAR CAMINO",
+            "C": "se separan"}.get(tipo, "")
+
+
+def rutas_de_campo(objetivos, crs_destino="EPSG:4326"):
+    """Las dos lineas de cada zona, recortadas a la zona y en grados.
+
+    Recortadas a proposito: el tramo entero mete en el aparato decenas de km
+    que ese dia no se van a andar, y en pantalla estorban.
+    """
+    import geopandas as gpd
+
+    salida = []
+    for f in objetivos:
+        cod = _codigos(objetivos)[(f["tramo"], f["zona"])]
+        for etiqueta, linea in (("camino registrado", f["_trozo"]),
+                                ("ruta del modelo", f["_alterna"])):
+            if linea is None or linea.length == 0:
+                continue
+            g = gpd.GeoSeries([linea], crs=f["_crs"]).to_crs(crs_destino)[0]
+            salida.append((f"{cod} {etiqueta}", g))
+    return salida
 
 
 def informe(cfg) -> dict:
@@ -269,7 +399,9 @@ def informe(cfg) -> dict:
 
     _tabla_de_zonas(filas, razones)
     objetivos = elige(filas, razones)
-    pts = estaciones(objetivos, dem=_dem(cfg))
+    dem = _dem(cfg)
+    jornadas = _tabla_de_jornadas(objetivos, dem)
+    pts = estaciones(objetivos, dem=dem)
 
     g = gpd.GeoDataFrame(pts, crs=rev.crs)
     w84 = g.to_crs("EPSG:4326")
@@ -277,16 +409,34 @@ def informe(cfg) -> dict:
 
     destino = cfg.dir_resultados
     destino.mkdir(parents=True, exist_ok=True)
-    g.to_file(destino / "estaciones.gpkg", layer="estaciones", driver="GPKG")
+
+    # Un solo GeoPackage con DOS capas, que es como QGIS espera abrirlo: se
+    # arrastra el archivo y salen las estaciones y las rutas juntas, en el
+    # CRS proyectado para que medir distancias en el mapa de un numero en
+    # metros y no en grados.
+    g.to_file(destino / "campo.gpkg", layer="estaciones", driver="GPKG")
+    rutas = rutas_de_campo(objetivos, crs_destino=rev.crs)
+    if rutas:
+        gpd.GeoDataFrame({"nombre": [n for n, _ in rutas]},
+                         geometry=[x for _, x in rutas], crs=rev.crs).to_file(
+            destino / "campo.gpkg", layer="rutas", driver="GPKG")
+
     g.drop(columns="geometry").to_csv(destino / "estaciones.csv", index=False)
-    escribe_gpx(g.to_dict("records"), destino / "estaciones.gpx")
+    escribe_gpx(g.to_dict("records"), destino / "estaciones.gpx",
+                rutas=rutas_de_campo(objetivos))
 
     _tabla_de_estaciones(g)
-    print(f"\n  -> {destino / 'estaciones.gpx'}  (para el GPS o el celular)")
-    print(f"  -> {destino / 'estaciones.gpkg'}  (para QGIS)")
+    print(f"\n  -> {destino / 'estaciones.gpx'}")
+    print("     Para el Garmin: copiarlo a la carpeta Garmin/GPX del aparato.")
+    print("     Lleva los waypoints con su simbolo por tipo (las B en rojo) y")
+    print("     las dos rutas de cada zona como tracks.")
+    print(f"  -> {destino / 'campo.gpkg'}")
+    print("     Para QGIS: dos capas, 'estaciones' y 'rutas'. Se arrastra el")
+    print("     archivo a la ventana y salen las dos.")
     print(f"  -> {destino / 'estaciones.csv'}")
     return {"zonas": [{k: v for k, v in f.items() if not k.startswith("_")}
                       for f in filas],
+            "jornadas": jornadas,
             "estaciones": g.drop(columns="geometry").to_dict("records")}
 
 

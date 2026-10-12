@@ -107,12 +107,18 @@ def test_el_control_no_se_duplica_si_ya_estaba_elegido():
 
 # ----------------------------------------------------------- las estaciones
 
+# Coordenadas UTM 18S de verdad (Amazonas): asi lo que se reproyecte cae
+# donde tiene que caer y un error de CRS se nota en el test, no en campo.
+E0, N0 = 180_000.0, 9_320_000.0
+
+
 def objetivo(tramo="Pauja - Santa Cruz"):
-    obs = recta(0, 0, 8000, 0)
-    mod = recta(0, 1500, 8000, 1500)
+    obs = recta(E0, N0, E0 + 8000, N0)
+    mod = recta(E0, N0 + 1500, E0 + 8000, N0 + 1500)
     return {"tramo": tramo, "zona": 1, "razon_local": 1.37, "prioridad": 1,
             "control": False, "desde_km": 0.0, "hasta_km": 8.0,
             "_obs": obs, "_mod": mod, "_trozo": obs, "_alterna": mod,
+            "_crs": "EPSG:32718",
             "_a": obs.interpolate(0.0), "_b": obs.interpolate(obs.length)}
 
 
@@ -170,13 +176,70 @@ def test_dos_zonas_del_MISMO_tramo_tampoco():
 def test_sin_alternativa_no_hay_estaciones_B():
     """Si la ruta del modelo no deja trozo en la zona, no se inventa."""
     o = objetivo()
-    o["_alterna"] = LineString([(0, 1500), (0, 1500)])
+    o["_alterna"] = LineString([(E0, N0 + 1500), (E0, N0 + 1500)])
     pts = campo.estaciones([o])
     assert [p["tipo"] for p in pts].count("B") == 0
     assert len(pts) == 5
 
 
 # ------------------------------------------------------------------- el GPX
+
+def test_el_gpx_sirve_en_un_garmin(tmp_path):
+    """El aparato trunca el nombre y muestra el comentario, no la
+    descripcion. Y el simbolo es lo que hace que las B no se salten."""
+    import xml.etree.ElementTree as ET
+
+    pts = [{"codigo": "PASA-06", "tipo": "B", "prioridad": 1,
+            "tramo": "Pauja - Santa Cruz", "nota": "ruta del modelo",
+            "altitud_m": 2280, "lat": -6.049356, "lon": -77.879069}]
+    destino = tmp_path / "e.gpx"
+    campo.escribe_gpx(pts, destino)
+
+    ns = {"g": "http://www.topografix.com/GPX/1/1"}
+    w = ET.parse(destino).findall(".//g:wpt", ns)[0]
+    assert len(w.find("g:name", ns).text) <= 12        # cabe en pantalla
+    assert w.find("g:sym", ns).text == "Flag, Red"     # las B, en rojo
+    cmt = w.find("g:cmt", ns).text
+    assert "BUSCAR CAMINO" in cmt and len(cmt) <= 40
+    assert "300 m a cada lado" in w.find("g:desc", ns).text
+
+
+def test_el_gpx_lleva_las_rutas_como_tracks(tmp_path):
+    """Un waypoint suelto no sirve el dia que hay que cruzar campo traviesa:
+    hace falta ver por donde va la linea."""
+    import xml.etree.ElementTree as ET
+
+    from shapely.geometry import LineString
+
+    pts = [{"codigo": "X-01", "tipo": "A", "prioridad": 1, "tramo": "T",
+            "nota": "n", "altitud_m": 100, "lat": -6.0, "lon": -77.0}]
+    rutas = [("PASA camino registrado",
+              LineString([(-77.0, -6.0), (-77.01, -6.01)])),
+             ("PASA ruta del modelo",
+              LineString([(-77.0, -6.0), (-77.02, -6.0)]))]
+    destino = tmp_path / "e.gpx"
+    campo.escribe_gpx(pts, destino, rutas=rutas)
+
+    ns = {"g": "http://www.topografix.com/GPX/1/1"}
+    arbol = ET.parse(destino)
+    trks = arbol.findall(".//g:trk", ns)
+    assert len(trks) == 2
+    assert trks[0].find("g:name", ns).text == "PASA camino registrado"
+    assert len(trks[0].findall(".//g:trkpt", ns)) == 2
+    assert trks[0].findall(".//g:trkpt", ns)[0].get("lat") == "-6.000000"
+
+
+def test_las_rutas_salen_recortadas_a_la_zona_y_en_grados():
+    """El tramo entero mete decenas de km que ese dia no se andan."""
+    rutas = campo.rutas_de_campo([objetivo()])
+    assert len(rutas) == 2
+    nombres = [n for n, _ in rutas]
+    assert any("camino registrado" in n for n in nombres)
+    assert any("ruta del modelo" in n for n in nombres)
+    for _, g in rutas:
+        x, y = g.coords[0]
+        assert -82 < x < -68 and -19 < y < 1        # grados, no metros
+
 
 def test_el_gpx_lleva_la_instruccion_en_cada_punto(tmp_path):
     """Un waypoint sin nota es un punto al que se llega sin saber que mirar."""
@@ -207,3 +270,44 @@ def test_el_gpx_aguanta_un_punto_sin_altitud(tmp_path):
 def test_el_paso_esta_en_la_cli():
     from camino import cli
     assert "campo" in cli.AYUDAS and "campo" not in cli.ORDEN
+
+
+# -------------------------------------- lo que cuesta andar cada zona
+
+def test_la_jornada_suma_el_camino_y_lo_que_hay_que_salirse():
+    """Lo que decide los dias no es la distancia a la base: es el camino mas
+    las idas y vueltas a las estaciones B, que van campo traviesa."""
+    o = objetivo()                      # camino 8 km, alternativa a 1.5 km
+    j = campo.jornada(o)
+
+    assert j["km_camino"] == pytest.approx(8.0, abs=0.1)
+    assert j["fuera_del_camino_km"] == [1.5, 1.5, 1.5]
+    assert j["km_fuera_ida_y_vuelta"] == pytest.approx(9.0, abs=0.1)
+    assert j["km_a_pie"] == pytest.approx(17.0, abs=0.2)
+
+
+def test_sin_dem_la_jornada_no_inventa_desnivel():
+    j = campo.jornada(objetivo(), dem=None)
+    assert j["subida_m"] == 0 and j["bajada_m"] == 0
+    assert j["km_a_pie"] > 0           # la distancia si se puede medir
+
+
+def test_una_zona_larga_o_empinada_pide_mas_de_un_dia():
+    """El caso de Pauja: 18 km de camino, 1924 m de subida y las B a 2-3 km.
+    Intentarlo en un dia acaba con las B sin hacer."""
+    assert campo.dias({"km_a_pie": 6.0, "subida_m": 400}) == 1
+    assert campo.dias({"km_a_pie": 32.3, "subida_m": 1924}) == 3
+    # el tope que manda es el peor de los dos
+    assert campo.dias({"km_a_pie": 10.0, "subida_m": 2500}) == 3
+    assert campo.dias({"km_a_pie": 40.0, "subida_m": 100}) == 3
+
+
+def test_ninguna_zona_pide_menos_de_un_dia():
+    assert campo.dias({"km_a_pie": 0.5, "subida_m": 10}) == 1
+
+
+def test_la_tabla_de_jornadas_dice_el_total(capsys):
+    filas = campo._tabla_de_jornadas([objetivo()])
+    salida = capsys.readouterr().out
+    assert len(filas) == 1 and "dias" in filas[0]
+    assert "piden" in salida and "a pie" in salida
